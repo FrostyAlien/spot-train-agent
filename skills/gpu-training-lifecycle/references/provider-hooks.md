@@ -27,8 +27,9 @@ credentials to its VMs by default) must allow updating that VM. Contract: `budge
 (`per_gpu_hour`, `cap_id`), created by the user or with their approval before the run. `switched` costs one restart
 per new VM and no progress (nothing trained yet); those starts never count as allocations without progress. A cap
 below the current price keeps the VM from starting until the price drops: a capacity wait. The spend bound keeps the
-on-demand ceiling. Only the recovery strategy FAILOVER restarts the same VM; with EAGER_NEXT_REGION (a fallback
-without the guard) every recovery is a new VM that caps itself again. Prove it once on the provider (a small GPU spot
+on-demand ceiling. Only the recovery strategy FAILOVER restarts the same VM; any other strategy replaces it (the cap
+would never hold and every start would cap and stop again), so the validator and the renderer accept the cap only with
+FAILOVER: one region, and no ordered on-demand fallback. On a non-spot VM the hook prints `capped` and does nothing. Prove it once on the provider (a small GPU spot
 VM, a few minutes) before relying on it.
 
 Rules: each function is idempotent and quiet on success, writes errors to stderr and exits nonzero on

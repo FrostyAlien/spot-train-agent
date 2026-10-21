@@ -343,11 +343,11 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
         timeout = f'timeout --signal=TERM --kill-after=120 {limit} '
     else:
         require(managed, 'Standard tier runs as a managed job (recovery.enabled=true); a plain sky launch is the Minimal tier')
-        attempts = rec.get('max_attempts')        # optional absolute cap, enforced by the guard (not SkyPilot)
+        attempts = rec.get('max_attempts')        # optional absolute cap, enforced by the worker's limits (not SkyPilot)
         require(attempts is None or (type(attempts) is int and attempts >= 1), 'max_attempts must be >= 1 or null')
-        # Runtime backstop: no allocation outlives the budget's runway at the on-demand ceiling (the guard's
-        # runway before earlier jobs' spend), so a run stays bounded if the guard host dies. It restarts with
-        # each allocation; the guard bounds the total. Exit 124 is an application failure: the job ends.
+        # Runtime backstop: no allocation outlives the budget's runway at the on-demand ceiling, so an allocation stays
+        # bounded even if the entrypoint never wired the worker's limits. It restarts with each allocation; the
+        # worker's limits bound the total. Exit 124 is an application failure: the job ends.
         total, ceiling = budget.get('total_limit'), budget.get('ceiling_hourly_usd')
         if total is not None and ceiling:
             runway = (total - (budget.get('controller_allowance') or 0)) / ceiling - SHUTDOWN_RESERVE_HOURS

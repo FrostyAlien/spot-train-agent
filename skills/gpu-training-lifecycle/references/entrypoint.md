@@ -20,7 +20,7 @@ The rendered task (`gpu-training-launch` → `scripts/render_job.py`) sets:
 | `CAMPAIGN_DEADLINE_UTC` | optional absolute deadline (train only; absent by default: the budget is the hard stop) |
 | `CAMPAIGN_SUBMITTED_AT`, `BUDGET_LIMIT_USD`, `BUDGET_RESERVED_USD`, `BUDGET_SPENT_BEFORE_USD`, `CEILING_HOURLY_USD`, `FREE_WITHOUT_VM`, `STARTUP_ALLOWANCE_MINUTES`, `MAX_ATTEMPTS_WITHOUT_PROGRESS`, `MAX_ATTEMPTS` | the run's limits (train only), passed to `checkpoint_marker.py limits` at every start (below); no secrets |
 | `PRICE_CAP_ID` | optional (`budget.spot_price_cap.cap_id`): the provider's spot price cap for `hook_price_cap` (provider hooks: optional spot price cap) |
-| `NOTIFY_URL`, `NOTIFY_FORMAT` | the notification channel, from the launch's secrets file; `notify.py` reads them (no URL: notices are skipped with a warning) |
+| `NOTIFY_URL`, `NOTIFY_FORMAT` | the notification channel: `NOTIFY_URL` is a required secret (in `SECRET_NAMES`) whenever the contract names a channel, so the wrapper blocks when it is missing; `notify.py` reads both |
 | `SECRET_NAMES` | secrets the launch supplies as environment variables (the `SKYPILOT_DOCKER_*` ones are consumed by SkyPilot for the image pull) |
 | `WANDB_*` or `METRICS_BACKEND` | the researcher's metrics choice; qualification runs get their own metrics run id |
 | `PURCHASE_MODE` | `on-demand-fallback` only in the guard's approved fallback task |
@@ -127,19 +127,25 @@ wrapper(argv):                                    # one process per node, the ta
     if RUN_MODE != rehearsal:
         report = gpu_preflight.probe(expected_gpus, expected_platform, min_free_gb=disk budget)   # as `gpu_preflight.py probe` does: print the JSON; exit 4 when not ok
         journal(run, attempt, "preflight", report + identity)   # image digest, dataset version, world size
-    if RUN_MODE == train and PRICE_CAP_ID is set:  # optional: each new VM caps its own spot price (provider hooks)
-        if hook_price_cap(PRICE_CAP_ID) == "switched":   # put under the cap and asked to stop: SkyPilot restarts it
-            journal(run, attempt, "price_cap", state="switched"); notify("spot price cap set; restarting this VM", "price_cap")
-            sleep up to 10 minutes for the stop; exit 3   # never exit 0 here: that would end the job
+    if RUN_MODE == train and FINAL.json exists under run:   # finalized earlier (a limit or completion): done
+        print("FINAL.json exists (outcome ...): nothing to train"); exit 0
     if RUN_MODE == train:                         # the run's limits; no outside guard is needed
-        limits = checkpoint_marker.limits(run, the rendered budget values above)   # as `checkpoint_marker.py limits`
-        journal(run, attempt, "limits", **limits)  # a relaunch and the finish read the spend bound here
+        limits = `checkpoint_marker.py limits $CHECKPOINT_DIR --from-env`   # exit 0: keep going, 5: a limit now
+        if its exit code is neither 0 nor 5: print("blocked: limits unreadable ..."); exit 3   # never train unbounded
+        journal(run, attempt, "limits", **limits)  # the finish and the status checks read the spend bound here
         if limits.limit:                          # reached now: stop without training, exit 0 (never a restart)
             journal(run, attempt, "limit", reached=limits.limit)
             try: checkpoint_marker.finalize(run, identity, outcome=OUTCOME[limits.limit])   # budget_stopped, ...
             except Blocked: pass                  # nothing committed yet: the journal says why
             notify(f"stopped: {limits.limit} (spend <= {limits.spend_upper_usd} USD, an upper bound)", "stopped"); exit 0
         env.CAMPAIGN_STOP_UTC = limits.stop_at_utc   # the budget runway's end or the deadline, whichever is first
+    if RUN_MODE == train and PRICE_CAP_ID is set:  # optional (offline only): each new VM caps its own spot price
+        cap = hook_price_cap(PRICE_CAP_ID)        # provider hooks; needs the provider CLI and credentials in the image
+        if cap failed: journal(run, attempt, "price_cap", state="failed"); notify("spot price cap failed: running uncapped", "price_cap")
+        if cap == "switched":                     # put under the cap and asked to stop: SkyPilot restarts this VM
+            journal(run, attempt, "price_cap", state="switched"); notify("spot price cap set; restarting this VM", "price_cap")
+            wait up to 10 minutes for the stop    # never exit 0 here: that would end the job
+            if hook_price_cap(PRICE_CAP_ID) != "capped": print("blocked: the VM did not stop under the cap"); exit 3
     selection = checkpoint_marker.select(run, identity, mount_root="/checkpoints")   # Blocked: print("blocked: ..."); exit 3
     journal(run, attempt, "selection", action=selection.action, step=selection.global_step)
     if RUN_MODE == train:
@@ -192,7 +198,8 @@ main():                                           # every rank, started by the l
     rank0: checkpoint_marker.finalize(run, identity, outcome="completed", target_step=last, artifacts=[final/...])
     rank0: journal(run, attempt, "finish"); notify(f"completed at step {last}", "completed"); exit 0
 ```
-`notify(text, event)` runs `/opt/gpu-skills/notify.py --event <event> <text>` (best effort; it never fails the run).
+`notify(text, event)` runs `timeout 20 python3 /opt/gpu-skills/notify.py --event <event> <text>` (best effort; it
+never fails or holds up the run).
 `OUTCOME` maps the limit to the FINAL outcome: budget -> `budget_stopped`, no_progress -> `no_progress_stopped`,
 attempts -> `attempts_stopped`, deadline -> `deadline_stopped`.
 

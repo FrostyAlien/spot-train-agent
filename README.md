@@ -57,14 +57,14 @@ In Claude Code, `/spot-trainer:start` does the same and continues a run that is 
 The agent reads your repository and asks its intake questions once: budget, GPU type and count, provider, where the data is, how you want to be notified and how much it may do without asking. Then it works through the run:
 
 1. **Choose:** compares current GPU offers by total cost of useful training, spot or on-demand, then keeps that provider for the whole run.
-2. **Prepare:** a small control host, the dataset in the provider's storage and the training image. If you don't have a working image, the agent writes the Dockerfile and entrypoint around your code, builds it (on the control host, or a short-lived CPU VM when you use an existing SkyPilot server, or on your own Linux machine or CI) and checks it; if you have one, it checks it and adds only what is missing.
+2. **Prepare:** a SkyPilot API server (your existing one, a provider-managed one, or a small control host), the dataset in the provider's storage and the training image. If you don't have a working image, the agent writes the Dockerfile and entrypoint around your code, builds it (on the control host, or a short-lived CPU VM when you use an existing SkyPilot server, or on your own Linux machine or CI) and checks it; if you have one, it checks it and adds only what is missing.
 3. **Test:** one short run that starts fresh, saves and resumes, measuring startup time and memory. It runs first on your own GPU if you have one and want to, then once on the rented GPUs before the real run.
-4. **Launch:** submits the job with a guard that enforces the approved budget, deadline and attempt limits.
+4. **Launch:** submits the job; the training container itself enforces the approved budget, deadline and attempt limits.
 5. **Monitor:** notifications for progress milestones, preemptions, recoveries and stalls; the agent reads the metrics at planned evaluations, judges whether training is on track and reports to you.
 6. **Recover:** a preempted worker is replaced on the same provider and resumes from the newest checkpoint that verifies. A run that stops making progress is stopped instead of burning budget.
 7. **Finish:** verifies the final checkpoint and outputs, reconciles cost, and lists and removes exactly what the run created.
 
-You pick how often the agent stops for approval: `automatic` (approve the plan once), `gated` (the default: approve where money is committed or something is deleted) or `steps` (approve every stage). No chat session has to stay open while training runs; the guard keeps watching and the agent comes back when there is something to judge.
+You pick how often the agent stops for approval: `automatic` (approve the plan once), `gated` (the default: approve where money is committed or something is deleted) or `steps` (approve every stage). No chat session has to stay open while training runs; the run watches itself and the agent comes back when there is something to judge.
 
 Works with one node of up to eight GPUs, any ML framework (PyTorch, Hugging Face, JAX, Lightning, ...) and datasets up to TB scale. Multi-node is on the [roadmap](#roadmap).
 
@@ -76,10 +76,10 @@ Works with one node of up to eight GPUs, any ML framework (PyTorch, Hugging Face
 |---|---|
 | `gpu-training-lifecycle` | Plan an experiment, or continue one, across all stages |
 | `gpu-rental-select` | Compare current GPU offers and total cost, spot or on-demand |
-| `gpu-training-controller` | Set up or check the control host and the guard |
+| `gpu-training-controller` | Choose and connect the SkyPilot API server: your control host, an existing or provider-managed one |
 | `gpu-training-image` | Build and check the training image |
 | `gpu-training-data` | Put the dataset in the provider's storage and read it during training |
-| `gpu-training-launch` | Run the qualification task and launch the job with its guard |
+| `gpu-training-launch` | Run the qualification task and launch the job with its limits |
 | `gpu-training-observe` | Check how a run is going: progress, spend, preemptions, stalls |
 | `gpu-training-recover` | Wire checkpoint resume into training code, or diagnose a failed resume |
 | `gpu-training-finish` | Verify outputs, reconcile cost and clean up exactly what the run created |
@@ -88,7 +88,7 @@ Works with one node of up to eight GPUs, any ML framework (PyTorch, Hugging Face
 
 - **The provider stays fixed once chosen.** Recovery stays on the chosen provider and purchase mode. Spot is the main way to save, not a requirement; an on-demand fallback runs only if you approved it in advance.
 - **Checkpoints you can trust after a preemption:** framework-native files in a bucket of the GPU provider, plus a `COMMITTED.json` marker written last after the checkpoint verifies. Restore picks the newest committed checkpoint that verifies and fails closed on doubt; it never silently starts over after known progress.
-- **Code only where it runs unattended or checks deterministically** (the guard, the stall watchdog, the checkpoint verifier). Everything else is a runbook of CLI commands with a check after each step, built on [SkyPilot](https://github.com/skypilot-org/skypilot) managed jobs and Docker, with the SkyPilot version chosen at the start.
+- **Code only where it runs unattended or checks deterministically** (the run's limits, the stall watchdog, the checkpoint verifier, the optional guard). Everything else is a runbook of CLI commands with a check after each step, built on [SkyPilot](https://github.com/skypilot-org/skypilot) managed jobs and Docker, with the SkyPilot version chosen at the start.
 - **No vendor tables.** The skills ship no GPU tables or provider facts. The agent researches the chosen provider when you pick it and records dated findings in your project.
 
 SkyPilot's official `skypilot` skill is required: these skills hand SkyPilot CLI and YAML details to it ([notes](OFFICIAL_SKYPILOT.md)).
@@ -100,13 +100,13 @@ SkyPilot's official `skypilot` skill is required: these skills hand SkyPilot CLI
 ```mermaid
 flowchart TB
   intake["Intake<br/>budget, GPUs, provider, data"] --> choose["Choose<br/>compare offers, lock provider"]
-  choose --> ctrl["Control host<br/>SkyPilot API server + guard"]
+  choose --> ctrl["SkyPilot API server<br/>existing or control host"]
   ctrl --> image["Training image<br/>reuse yours or build it"]
   ctrl --> data["Dataset in<br/>provider storage"]
   image --> qualify["Test: fresh start,<br/>save, resume"]
   data --> qualify
   qualify --> approve{"You approve<br/>the main run"}
-  approve --> launch["Launch<br/>with the guard"]
+  approve --> launch["Launch<br/>with the run's limits"]
   launch --> loop["Train, monitor,<br/>recover"]
   loop --> finish["Finish<br/>verify, cost, cleanup"]
 ```

@@ -45,7 +45,8 @@ nebius billing pricing-policy create --parent-id <project id> --name <run id>-ca
 ```
 Record the returned ID as `budget.spot_price_cap.cap_id` (and the price as `per_gpu_hour`). The worker then caps its
 own VM through `hook_price_cap` (provider hooks: optional spot price cap). Prove it once with a small GPU spot VM for
-a few minutes before relying on it: the update below, the VM's own credentials, SkyPilot's restart of the stopped VM
+a few minutes before relying on it: the hook's update (`compute instance update --patch --spot-pricing-policy-id
+<id> --stopped` in nebius-hooks.sh), the VM's own credentials, SkyPilot's restart of the stopped VM
 and the cap on the restarted VM.
 
 ## Nebius's own agent skills

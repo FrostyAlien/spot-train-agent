@@ -49,10 +49,10 @@ FINAL.json                                 written once at the end by `finalize`
 `budget_stopped`, `no_progress_stopped`, `attempts_stopped`) and `--artifact` for every extra file the user needs at finish (best model, exported metrics), which must already be on the mount: only the resume state is otherwise durable, so a best model kept on the worker's disk is lost when a replacement takes over. The finish stage checks the record with `verify-final` against the bucket.
 
 6. **The run's limits, from inside the worker.** At each start, after the preflight is journaled, the wrapper runs
-`checkpoint_marker.py limits $CHECKPOINT_DIR` with the rendered budget values (lifecycle `references/entrypoint.md#inputs`).
+`checkpoint_marker.py limits $CHECKPOINT_DIR --from-env`, which reads the rendered budget values (lifecycle `references/entrypoint.md#inputs`).
 It reads the journal (allocations, and those in a row that ended without a commit) and the alive files (how long each
-allocation ran), and prints the spend upper bound and `stop_at_utc`, the time the budget runway ends (or the deadline,
-if earlier). Exit 5 means a limit is reached now: the wrapper finalizes with that limit's outcome without training
+allocation ran: to the latest of its alive file and its journal events, plus two progress periods), and prints the spend upper bound and `stop_at_utc`, the time the budget runway ends (or the deadline,
+if earlier). Exit 5 means a limit is reached now (any other nonzero exit: the wrapper blocks with exit 3, never trains unbounded): the wrapper finalizes with that limit's outcome without training
 (or, with nothing committed yet, journals `limit` and exits 0). Otherwise it trains until `stop_at_utc` like a
 deadline. Every stop exits 0, the only code that ends a managed job without a restart whatever
 `max_restarts_on_errors` is. The bound counts waiting without a VM as free only with `--free-without-vm` and readable

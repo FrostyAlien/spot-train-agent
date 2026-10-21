@@ -7,7 +7,7 @@ access set up by the user; never ask for secret values in chat. Steps marked *(o
 
 ## 0. Which server
 From intake item 15, recorded as `controller.mode` in the contract:
-- **`self-hosted`**: a control host the user runs (steps 1-7 below).
+- **`self-hosted`**: a control host the user runs (steps 1-7 below; step 8 of the SKILL only for a long-lived one).
 - **`existing`** (a server someone else runs, such as a team's) or **`provider-managed`** (a cloud provider's hosted
   server): no control host; connect to it ([existing server](#an-existing-provider-managed-or-local-server-offline-only)).
 - **`local`**: the API server on the operator's machine (`sky api start`), for development and small runs. Managed
@@ -106,7 +106,7 @@ The user logs in, in their own terminal, never in chat or in a command the agent
   stores the URL, password included, in `~/.sky/config.yaml`: never print that file, and read `sky api info` only
   through the redaction filter below.
 ```bash
-sky api info -o json | sed -E 's#://[^/@ ]+@#://<redacted>@#g'
+sky api info -o json | sed -E 's#://[^@]*@#://<redacted>@#g'
 sky check <cloud>
 sky status -u | grep -i sky-jobs-controller || echo "no separate jobs controller (consolidated, or none yet)"
 ```
