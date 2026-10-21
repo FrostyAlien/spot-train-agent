@@ -13,8 +13,8 @@ Ask once, early, with this intake checklist rather than stage by stage. Ask ever
 6. **Budget cap:** the total the run may spend. Recommendation: proposed after a price dry run (selection skill, seconds); without one, the figure is labelled an unpriced guess.
 7. **Deadline:** only when the result is needed by a date. Recommendation: none; the budget is the hard stop.
 8. **Provider, purchase mode** and whether an on-demand fallback is pre-approved. Recommendation: spot, no fallback.
-9. **Build machine** for the image and data preparation (never a rented GPU). Recommendation: the control host.
-10. **Owned GPU** for the code dev loop. Recommendation: not needed; a failed qualification keeps its cluster for fixes.
+9. **Image and build machine:** an existing working image to reuse (checked, not rebuilt), or where to build one (never a rented GPU). Recommendation: the control host, or without one (an existing SkyPilot server) a short-lived CPU VM through that SkyPilot; locally only on a Linux machine of the target platform with good upload, or in existing CI (image skill: builder and platform). Data preparation runs where the data skill's staging says.
+10. **Owned GPU** for testing the image locally before renting and for the code dev loop. Recommendation: use it when the user has one and is willing; otherwise a failed qualification keeps its cluster for fixes.
 11. **Data:** where it is, how it reaches storage (copy into the provider's bucket by default, or read the pinned source) and its mount mode with the startup it adds to every new VM (a loader that reads everything at start pays it in any mode). Recommendation: copy into the bucket; `COPY` when it fits the disk.
 12. **Notifications** (Standard): the channel. Recommendation: a private push topic the user already reads.
 13. **Metrics tool:** W&B (entity, history policy: `gpu-training-observe` → `references/wandb.md#history-policy-the-user-chooses`), another tool, or none. Recommendation: what the project already uses.

@@ -57,6 +57,8 @@ for two minutes: read the API server log (controller runbook) before anything el
 
 ## 1. GPU qualification (once per new stack; inside the approved qualification cap)
 Before it, in the image on CPU: the exact `ARGV` parsed by the framework's own parser (image runbook step 3).
+Optionally, when the user has a GPU of their own and wants to, the same two starts run there first
+(image runbook: [local test](../../gpu-training-image/references/runbook.md#5-local-test-on-the-users-gpu-optional-offline-only)).
 Build the qualification argv `QARGV`: `ARGV` plus the framework's step settings for 20 steps, evaluating and
 saving every 6 (lifecycle entrypoint contract: `qualify`). With a qualification subset (`dataset.qualify_uri`,
 data skill: staging) the task reads the subset instead of the full dataset, in the same mount mode and with

@@ -4,7 +4,7 @@ Let your coding agent run your model training on cheap spot (preemptible) GPU in
 
 I built this to spend less on renting GPUs for my own research: spot instances are much cheaper, but they get preempted, and a run needs watching. These skills let my agent handle both, so I can train on spot capacity and check in only when there is something to decide. If you rent GPUs for research training and want the same, give it a try.
 
-Version 0.9.4 • [MIT](LICENSE) • Works with Claude Code, Codex and other hosts that read `SKILL.md` skills
+Version 0.9.5 • [MIT](LICENSE) • Works with Claude Code, Codex and other hosts that read `SKILL.md` skills
 
 ## Install
 
@@ -48,8 +48,8 @@ In Claude Code, `/spot-train-agent:start` does the same and continues a run that
 The agent reads your repository and asks its intake questions once: budget, GPU type and count, provider, where the data is, how you want to be notified and how much it may do without asking. Then it works through the run:
 
 1. **Choose:** compares current GPU offers by total cost of useful training, spot or on-demand, then keeps that provider for the whole run.
-2. **Prepare:** a small control host, the training image and the dataset in the provider's storage.
-3. **Qualify:** one short run on the real GPUs that starts fresh, saves, and resumes, measuring startup time and memory.
+2. **Prepare:** a small control host, the dataset in the provider's storage and the training image. If you don't have a working image, the agent writes the Dockerfile and entrypoint around your code, builds it (on the control host, or a short-lived CPU VM when you use an existing SkyPilot server, or on your own Linux machine or CI) and checks it; if you have one, it checks it and adds only what is missing.
+3. **Test:** one short run that starts fresh, saves and resumes, measuring startup time and memory. It runs first on your own GPU if you have one and want to, then once on the rented GPUs before the real run.
 4. **Launch:** submits the job with a guard that enforces the approved budget, deadline and attempt limits.
 5. **Monitor:** notifications for progress milestones, preemptions, recoveries and stalls; the agent reads the metrics at planned evaluations, judges whether training is on track and reports to you.
 6. **Recover:** a preempted worker is replaced on the same provider and resumes from the newest checkpoint that verifies. A run that stops making progress is stopped instead of burning budget.
@@ -92,9 +92,9 @@ SkyPilot's official `skypilot` skill is required: these skills hand SkyPilot CLI
 flowchart TB
   intake["Intake<br/>budget, GPUs, provider, data"] --> choose["Choose<br/>compare offers, lock provider"]
   choose --> ctrl["Control host<br/>SkyPilot API server + guard"]
-  ctrl --> image["Training image"]
+  ctrl --> image["Training image<br/>reuse yours or build it"]
   ctrl --> data["Dataset in<br/>provider storage"]
-  image --> qualify["Qualify<br/>fresh start, save, resume"]
+  image --> qualify["Test: fresh start,<br/>save, resume"]
   data --> qualify
   qualify --> approve{"You approve<br/>the main run"}
   approve --> launch["Launch<br/>with the guard"]
@@ -128,7 +128,8 @@ flowchart LR
 Works now:
 
 - [x] Compare current GPU offers by total cost of useful training, spot or on-demand
-- [x] One node with 1-8 GPUs, any ML framework, a pinned Docker image
+- [x] One node with 1-8 GPUs, any ML framework
+- [x] Build and test the training image with you
 - [x] Recover from spot preemption: replacement on the same provider, resume from the newest verified checkpoint
 - [x] Guard with budget, deadline, attempt and capacity-wait limits, and notifications
 - [x] Stall watchdog that stops a hung run instead of letting it bill
@@ -140,8 +141,9 @@ Works now:
 Next:
 
 - [ ] Multi-node training
+- [ ] Live test of reusing your own image and of the local test on your own GPU
 - [ ] Live test with 8 GPUs on one node
-- [ ] A provider's managed SkyPilot API server instead of your own control host
+- [ ] Run on an existing SkyPilot server with no control host: limits from SkyPilot's own settings and the worker, guard optional
 - [ ] Live test of the guard's on-demand fallback and cancel paths
 - [ ] Control-plane backup and restore
 
