@@ -66,7 +66,9 @@ crashing hours later.
 
 ## Qualification subset
 Stage a few hundred samples beside the dataset, under `<dataset uri>/qualify/`, with their own manifest,
-prepared exactly like the full data. Choose worst cases: the largest samples by the project's cost driver
+prepared exactly like the full data: the same file format and layout, metadata files included (a dataset card
+or index that declares split sizes must match the samples in both). The qualification never reads the full
+data, so a mismatch there shows only at the main launch (checked on CPU before the qualification: `gpu-training-launch` → `references/runbook.md#1-gpu-qualification-once-per-new-stack-inside-the-approved-qualification-cap`). Choose worst cases: the largest samples by the project's cost driver
 (tokens, pixels after resize, boxes or masks per image), samples with no labels and samples with the most.
 Give the eval split `N·b + 1` samples (N ranks of the planned run, b its per-device eval batch), so every
 way of sharding it ends in an uneven batch. Record the prefix as `dataset.qualify_uri`; the qualification

@@ -64,11 +64,13 @@ the optional guard; keep `SCHED` for the run). A `sky` command silent
 for two minutes: read the API server log (controller runbook) before anything else.
 
 ## 1. GPU qualification (once per new stack; inside the approved qualification cap)
-Before it, in the image on CPU: the exact `ARGV` parsed by the framework's own parser (image runbook step 3).
+Before it, in the image on CPU: the exact `ARGV` parsed by the framework's own parser (image runbook step 3),
+and, after any change to the staged full dataset (dropped or fixed samples), its index or split metadata loaded
+with the project's own loader, with the split sizes of its manifest: the qualification reads only the subset.
 Optionally, when the user has a GPU of their own and wants to, the same two starts run there first
 (image runbook: [local test](../../gpu-training-image/references/runbook.md#5-local-test-on-the-users-gpu-optional-offline-only)).
-Build the qualification argv `QARGV`: `ARGV` plus the framework's step settings for 20 steps, evaluating and
-saving every 6 (lifecycle entrypoint contract: `qualify`). With a qualification subset (`dataset.qualify_uri`,
+Build the qualification argv `QARGV`: `ARGV` plus the framework's step settings for `3S + 2` steps, evaluating
+and saving every `S`, with `S` = 6 + the loader's look-ahead in `ARGV` (lifecycle entrypoint contract: `qualify`). With a qualification subset (`dataset.qualify_uri`,
 data skill: staging) the task reads the subset instead of the full dataset, in the same mount mode and with
 the same disk. `ES` is the full eval set's size over the subset's. Leave `--eval-scale` out when the project
 does not evaluate.
@@ -98,7 +100,8 @@ Check: `stage qualify-$T exit 0` and the journal-check line `{"events": ..., "ok
 renderer stamps the task with its render time, so launch right after rendering); then `sky down -y q-$T`.
 On a failure, first run `sky autostop -y q-$T -i 30 --down`: a launch that failed while provisioning or
 mounting never set the task's own autodown, and `sky status` then shows no AUTOSTOP for a VM that bills until
-someone tears it down. Keep the cluster for the fix loop below, and `$W/secrets.env` with it; `sky down` it
+someone tears it down. When that command fails too (a cluster left half set up), retry the launch on it now or
+`sky down -y q-$T`; never leave it without autostop. Keep the cluster for the fix loop below, and `$W/secrets.env` with it; `sky down` it
 once a qualification passes or the user stops. `peak_memory_fraction` above 0.9
 fails: lower the per-device batch in `ARGV` (raise gradient accumulation to keep the effective batch) and
 repeat; no image rebuild. A spot cluster that the provider stopped during the task (`sky status` shows it
@@ -119,11 +122,13 @@ After a pass, set these and report them to the user in one block:
   I/O), and the save interval they imply; set that interval in `ARGV`. Set `disk.size_gb` so that
   1.25 x `checkpoint_gb` + 10 GB fit beside the image and data. Both rules: `gpu-training-recover` →
   `references/contract.md#checkpoint-size-path-and-save-interval`.
-- **Data:** `loader_wait_fraction` (or `read_mb_s` for `MOUNT` data): a large share means more loader
-  workers or another mount mode before the paid run.
+- **Data:** `loader_wait_fraction` (or `read_mb_s` for `MOUNT` data): above 0.3 the run is limited by data
+  loading, not the GPU. Report it; before the paid run, add loader workers (or another mount mode) and
+  qualify again, or accept the measured rate.
 - **Time:** the expected training time is `step_seconds` x the target steps, plus the evaluations
   (`eval_seconds` scaled by the full eval set's size over the subset's); the observe runbook's planned waits
-  use it.
+  use it. The subset can still read faster than the full data (page cache, smaller files): the first planned
+  evaluation checks the rate.
 - **Hang limits** *(offline only)*: copy the printed `recommended.watchdog` into the contract's `watchdog`; its
   `notes` and tuning: `gpu-training-observe` → `references/guard.md#stall-watchdog`. Set the collective timeout
   in `ARGV` too (entrypoint contract).

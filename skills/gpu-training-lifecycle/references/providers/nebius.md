@@ -38,7 +38,10 @@ Hooks for these operations: [nebius-hooks.sh](../../assets/providers/nebius-hook
 ## Optional spot price cap *(offline only)*
 A pricing policy holds a maximum spot price per GPU-hour for one GPU platform in one project; above it Nebius stops
 the VM. Its price can change only while no running VM uses it; a cap below the current price blocks starts until the
-price drops. With the user's approval, before the run:
+price drops. Only some platforms take a policy, and the set depends on the region (live 2026-10-21, eu-north1: only
+`gpu-h100-sxm` and `gpu-h200-sxm`; `gpu-l40s-a` was refused with `PlatformNotAvailable`). Check the chosen
+platform when the GPU is chosen, by creating the policy (free; delete it when the cap is not used) or from Nebius's pricing-policy docs, before the cap
+goes into the plan. With the user's approval, before the run:
 ```bash
 nebius billing pricing-policy create --parent-id <project id> --name <run id>-cap \
   --compute-instance-spec-v1-platform <gpu platform> --pricing-max-price-v1-max-price <price per GPU-hour>

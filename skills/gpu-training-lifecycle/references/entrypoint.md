@@ -81,13 +81,16 @@ approved by the user), it never silently continues with different hyperparameter
 - `train`: the full run below.
 - `qualify`: the real image, launcher, world size, precision and per-device batch, on the qualification subset.
   Its argv is the real argv plus the framework's own settings for the step count and the save and evaluation
-  intervals, never a debug mode that turns saving off. Default shape: 20 steps, save (and evaluate, when the
-  project evaluates) every 6. Size the subset so the 20 steps cross one epoch boundary: epoch-start work then
-  shows in the measured gaps.
+  intervals, never a debug mode that turns saving off. Default shape: save (and evaluate, when the project
+  evaluates) every `S` steps and train `3S + 2`, where `S` is 6 plus the loader's look-ahead (background
+  workers x prefetched batches each; 0 without background loading, which gives 20 steps). Batches prepared
+  during startup otherwise serve most measured steps, which then show the GPU's speed and hide a data-loading
+  bottleneck. Size the subset so the `3S + 2` steps cross one epoch boundary: epoch-start work then shows in
+  the measured gaps.
   The task runs the entrypoint twice and checks the journal (`checkpoint_marker.py journal-check`):
-  - start 1 (fresh) stops after its second commit (steps 6 and 12; the second save shows the steady
+  - start 1 (fresh) stops after its second commit (steps `S` and `2S`; the second save shows the steady
     state): journal `finish`, exit 0;
-  - start 2 resumes from step 12, saves at 18, trains to 20, saves and runs `finalize` (`completed`).
+  - start 2 resumes from step `2S`, saves at `3S`, trains to `3S + 2`, saves and runs `finalize` (`completed`).
   Shuffling is off in this mode, and the first train batch holds the subset's largest samples by the
   project's cost driver (tokens, pixels after resize, boxes per image), so peak memory shows in step 1.
   When the project evaluates, the eval set has `N·b + 1` samples (N ranks, b per-device eval batch): every
@@ -95,9 +98,11 @@ approved by the user), it never silently continues with different hyperparameter
   (some frameworks change how they gather after the first evaluation).
   Rank 0 journals `save_seconds` (how long that save blocked training) and `checkpoint_gb` with every
   `commit`, and with `finish`: `peak_memory_fraction` (highest rank, of the device total), `startup_seconds`
-  (entrypoint start to the first step), `step_seconds` (one train step after the first),
+  (entrypoint start to the first step), `step_seconds` (mean wall time per train step over start 1's steps
+  after the look-ahead is used up, saves and evaluations excluded; not one step),
   `eval_seconds` (one evaluation of the subset's eval set, when the project evaluates) and
-  `loader_wait_fraction` (share of step time spent waiting for data; for `MOUNT` data also `read_mb_s`).
+  `loader_wait_fraction` (share of step time spent waiting for data over the same steps; for `MOUNT` data
+  also `read_mb_s`).
   Above 0.9 memory the task fails: lower the per-device batch in argv. The numbers size the save interval,
   the disk and the startup allowance (launch runbook).
 - `rehearsal`: the optional CPU fallback, the same two starts on a CPU VM: one process, GPU-only options
@@ -126,7 +131,7 @@ wrapper(argv):                                    # one process per node, the ta
     if the dataset manifest is missing under DATASET_DIR (or DATASET_URI): print("blocked: ..."); exit 3   # an empty prefix mounts nothing
     if RUN_MODE != rehearsal:
         report = gpu_preflight.probe(expected_gpus, expected_platform, min_free_gb=disk budget)   # as `gpu_preflight.py probe` does: print the JSON; exit 4 when not ok
-        journal(run, attempt, "preflight", report + identity)   # image digest, dataset version, world size
+        journal(run, attempt, "preflight", report + identity)   # the probe JSON as printed (GPU name and driver are per device, in report.devices[]); image digest, dataset version, world size
     if RUN_MODE == train and FINAL.json exists under run:   # completed or stopped at the deadline: final
         print("FINAL.json exists (outcome ...): nothing to train"); exit 0
     if RUN_MODE == train:                         # the run's limits; no outside guard is needed

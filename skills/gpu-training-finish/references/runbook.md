@@ -38,6 +38,11 @@ marker and every manifest file at its manifest size), not hash-verified; a resum
 `keep` list with no commit in `FINISH-JOURNAL` means nothing durable; otherwise check the bucket (a directory the
 prune list cannot read is skipped). Report both.
 
+**A run the user stops early:** cancel by id with `sky jobs cancel -y --graceful --graceful-timeout 120 $JOB` (queued
+uploads finish first) and wait until it is terminal. When the user wants the newest committed checkpoint as the
+result, run `checkpoint_marker.py finalize` on the run directory with the identity flags `verify-final` takes,
+`--outcome stopped` and `--artifact` for an exported model, in a small CPU task that mounts the run's bucket, then verify it as above (step 2).
+
 ## 3. Evidence
 ```bash
 for j in <job ids>; do
