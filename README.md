@@ -23,7 +23,16 @@ Install Spot Train Agent from https://github.com/FrostyAlien/spot-train-agent in
   claude plugin install spot-train-agent --marketplace https://github.com/FrostyAlien/spot-train-agent.git --scope project
   ```
 
-- **Codex, or Claude Code without plugins:** copy the nine folders under [`skills/`](skills/) and SkyPilot's [`agent/skills/skypilot`](https://github.com/skypilot-org/skypilot/tree/master/agent/skills/skypilot) into `.agents/skills/` (Codex) or `.claude/skills/` (Claude Code) in your project, each folder whole. Your agent does this from the prompt above.
+- **Codex** (CLI 0.162.1 or later, every project): Codex does not install plugin dependencies, so install SkyPilot's plugin first, then this one.
+
+  ```sh
+  codex plugin marketplace add https://github.com/skypilot-org/skypilot.git --sparse .claude-plugin --sparse agent
+  codex plugin add skypilot@skypilot
+  codex plugin marketplace add https://github.com/FrostyAlien/spot-train-agent.git
+  codex plugin add spot-train-agent@spot-train-agent
+  ```
+
+- **Codex in one project, or Claude Code without plugins:** copy the nine folders under [`skills/`](skills/) and SkyPilot's [`agent/skills/skypilot`](https://github.com/skypilot-org/skypilot/tree/master/agent/skills/skypilot) into `.agents/skills/` (Codex) or `.claude/skills/` (Claude Code) in your project, each folder whole. Your agent does this from the prompt above.
 
 Installing only copies skill files. Nothing installs software, logs in or rents resources until you approve it during a run.
 

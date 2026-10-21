@@ -5,9 +5,9 @@ You are a coding agent and the user asked you to install Spot Train Agent (https
 ## 1. Ask the user two things
 
 - **Which agent host:** Claude Code, Codex, or both.
-- **Where:** this project only (recommended), or every project on this machine (Claude Code plugin, user scope).
+- **Where:** this project only (recommended), or every project on this machine (Claude Code plugin with user scope, or the Codex plugin).
 
-If they have no preference, install for the host you are running in, in the current project.
+If they have no preference, install for the host you are running in, in the current project. Codex plugins always apply to every project, so for Codex in one project only, copy the skill folders (2c).
 
 ## 2a. Claude Code: install the plugins
 
@@ -24,7 +24,24 @@ Check: `claude plugin list` shows `spot-train-agent@spot-train-agent` and `skypi
 
 Update later with `claude plugin update spot-train-agent@spot-train-agent`; remove with `claude plugin uninstall spot-train-agent@spot-train-agent` (then `claude plugin prune` removes the `skypilot` dependency if nothing else uses it).
 
-## 2b. Codex, or Claude Code without plugins: copy the skill folders
+## 2b. Codex: install the plugins
+
+Codex reads this repository's Claude Code marketplace, but it does not install plugin dependencies. Install SkyPilot's `skypilot` plugin yourself first, then Spot Train Agent (Codex CLI 0.162.1 or later):
+
+```sh
+codex plugin marketplace add https://github.com/skypilot-org/skypilot.git --sparse .claude-plugin --sparse agent
+codex plugin add skypilot@skypilot
+codex plugin marketplace add https://github.com/FrostyAlien/spot-train-agent.git
+codex plugin add spot-train-agent@spot-train-agent
+```
+
+The plugins apply to every project on this machine (they are recorded in `~/.codex/config.toml`).
+
+Check: `codex plugin list` shows `skypilot@skypilot` and `spot-train-agent@spot-train-agent` as `installed, enabled`. In the next session the skill list holds `skypilot:skypilot` and the nine `spot-train-agent:gpu-*` skills. The `/spot-train-agent:start` command is Claude Code only; in Codex the user starts in plain words.
+
+Update later with `codex plugin marketplace upgrade spot-train-agent`, then run the `codex plugin add spot-train-agent@spot-train-agent` line again. Remove with `codex plugin remove spot-train-agent@spot-train-agent` and `codex plugin marketplace remove spot-train-agent` (the same two commands with `skypilot` remove SkyPilot's plugin if nothing else uses it).
+
+## 2c. Codex in one project, other hosts, or no plugins: copy the skill folders
 
 Install ten skill folders: the nine under `skills/` of https://github.com/FrostyAlien/spot-train-agent, and SkyPilot's `skypilot` skill at `agent/skills/skypilot` of https://github.com/skypilot-org/skypilot. If your host has its own skill installer (for example one that installs skills from a GitHub repository), use it on those folders. Otherwise copy them yourself:
 
@@ -36,7 +53,7 @@ Install ten skill folders: the nine under `skills/` of https://github.com/Frosty
 
 Check: the nine `gpu-*` folders and `skypilot` exist in the target, each with a `SKILL.md`. The host discovers them in the next session. To update later, compare each installed folder with the new version, ask before replacing a folder the user changed, then copy again.
 
-Use the plugin or the copied skills in Claude Code, not both.
+In each host, use the plugin or the copied skills, not both.
 
 ## 3. Tell the user how to start
 
