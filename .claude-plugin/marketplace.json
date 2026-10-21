@@ -1,0 +1,18 @@
+{
+  "name": "spot-train-agent",
+  "description": "Spot Train Agent: agent skills for GPU training on spot instances",
+  "owner": {
+    "name": "Zirui Xiao",
+    "url": "https://github.com/FrostyAlien"
+  },
+  "allowCrossMarketplaceDependenciesOn": [
+    "skypilot"
+  ],
+  "plugins": [
+    {
+      "name": "spot-train-agent",
+      "source": "./",
+      "description": "Let your coding agent run GPU training on spot instances: it launches the run, monitors progress and spend, recovers from preemption and cleans up."
+    }
+  ]
+}

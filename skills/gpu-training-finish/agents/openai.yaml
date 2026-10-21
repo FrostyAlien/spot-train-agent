@@ -1,0 +1,14 @@
+interface:
+  display_name: GPU Training Closure
+  short_description: Verify artifacts, cleanup scope, and final cost
+  default_prompt: Use $gpu-training-finish to verify outputs and close my GPU training
+    experiment safely.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

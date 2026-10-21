@@ -1,0 +1,14 @@
+interface:
+  display_name: GPU Training Observation
+  short_description: Track progress, budget, and recovery health
+  default_prompt: Use $gpu-training-observe to inspect training progress, checkpoint
+    health, and remaining budget.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

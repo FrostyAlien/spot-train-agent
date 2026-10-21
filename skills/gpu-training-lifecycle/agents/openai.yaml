@@ -1,0 +1,14 @@
+interface:
+  display_name: GPU Training Lifecycle
+  short_description: Coordinate cost-efficient, resumable GPU research
+  default_prompt: Use $gpu-training-lifecycle to plan a reproducible GPU research
+    experiment from selection through cleanup.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

@@ -1,0 +1,14 @@
+interface:
+  display_name: GPU Rental Selection
+  short_description: Compare suitable GPU offers by total run cost
+  default_prompt: Use $gpu-rental-select to compare fresh GPU offers for my next training
+    experiment.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

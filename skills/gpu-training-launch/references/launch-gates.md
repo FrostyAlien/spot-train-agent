@@ -1,0 +1,67 @@
+# Launch gates and source record
+Checked 2026-10-01; exact installed release support must be verified.
+
+Contents: SkyPilot fields; recovery semantics; cost fields and the estimate; storage mounts; API access; provider support; qualification; storage and monitoring gates; provider-native storage identifiers; launch evidence; Minimal tier; instance shape; SkyPilot version; region policy; renderer scope; checkpoint storage verification; pre-submission checks; after submission.
+
+## SkyPilot fields
+Current SkyPilot syntax: `num_nodes: 1`; `resources.infra: provider/region`; `resources.accelerators: A100:8`; `resources.image_id: docker:IMAGE@sha256:DIGEST`; `resources.use_spot: true`; `resources.job_recovery: {strategy: FAILOVER, max_restarts_on_errors: 0}`; `file_mounts: {/checkpoints: {source: s3://BUCKET, mode: MOUNT_CACHED, type: MODEL_CHECKPOINT_RW}}` (bucket root only for MOUNT modes; `checkpoint.mount_cached` adds `config: {mount_cached: {...}}` overrides of the preset); top-level `api_server_access: false`.
+Source: https://docs.skypilot.ai/en/latest/reference/yaml-spec.html
+
+## Recovery semantics
+FAILOVER can expand after a first-region retry; both strategies return to the original task resource set. Therefore original resources must enforce provider and region. No silent spot-to-on-demand fallback: use_spot stays true in every candidate of the primary task, so SkyPilot can never pick on-demand by itself. A user-approved fallback is a separate task (`render_job.py --variant on-demand-fallback`) that only the campaign guard launches after the approved capacity wait. If capacity cannot be reacquired within the approved wait/attempt limits, stop/report rather than broaden placement or purchase mode. A finite `max_restarts_on_errors` limits application errors, not all preemption/capacity attempts; `recover_on_exit_codes` bypasses that ceiling and 137 must not be used. A separate durable guard (the campaign guard) must implement campaign max attempts, budget and any deadline. Do not translate every GPU error to an unlimited special exit code. The renderer therefore sets `max_restarts_on_errors` from `recovery.max_app_restarts` (SkyPilot's default 0; any nonnegative value the user chooses), never from `recovery.max_attempts`. SkyPilot's examples use 3-5 for transient errors; a preflight, restore or configuration failure is deterministic, and each restart would re-rent a GPU for the same error. SkyPilot has no "do not retry" exit code: with `max_app_restarts` above 0, a blocked restore (exit 3) or failed preflight (exit 4) is retried that many times too. `max_attempts` counts infrastructure allocations and is enforced by the campaign guard.
+Sources: https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py and https://docs.skypilot.ai/en/latest/examples/managed-jobs.html
+
+Require explicit manifest purchase_model of spot or on-demand; the renderer has no purchase-mode override or default. Null leaves planning open and blocks rendering a launch artifact.
+
+## Cost fields and the estimate
+`max_hourly_cost` is a per-instance optimizer filter. It is not provider bid enforcement, a runtime kill switch, or an all-in budget; do not generate it from a total cap without a rate policy. `sky cost-report` is cache-based and can be inaccurate for spot/autostop or external changes. Bind the expected cost to measured useful throughput, including staging, warmup, checkpoint/restore/recompute, control, storage, egress and retained resources.
+Sources: https://docs.skypilot.ai/en/latest/reference/yaml-spec.html and https://docs.skypilot.ai/en/stable/reference/cli.html
+
+## Storage mounts
+Storage follows SkyPilot's file mounts. The renderer mounts the checkpoint bucket at `/checkpoints` (`MOUNT_CACHED` by default, SkyPilot's recommended checkpoint mode, with its `MODEL_CHECKPOINT_RW` preset: parallel uploads, large read chunks; the contract's optional `checkpoint.mount_cached` overrides single settings) and, when `dataset.mount_mode` is set, the dataset at `/data` (`COPY` for data that fits on disk, `MOUNT` for very large or streamed data, `MOUNT_CACHED` for cached reads). `MOUNT` and `MOUNT_CACHED` accept only a bucket root, so the renderer mounts the bucket and exports `CHECKPOINT_DIR`/`DATASET_DIR` pointing at the URI's prefix inside it; `COPY` takes the full URI. A mount gives no completeness guarantee by itself: the recover skill's COMMITTED marker does. Check the mounts in the first run of a stack. Use durable storage in the selected provider and region for TB data.
+
+## API access
+SkyPilot examples commonly enable API access for jobs; disable for ordinary training to reduce nested-launch capability. A worker still needs the narrowly scoped data/checkpoint access approved for the task. Never put credentials in experiment.json, rendered YAML, Docker build args, evidence reports or shell history.
+
+## Provider support
+Changing provider APIs: verify current provider documentation, catalog and the exact installed adapter for the selected provider (research it per `gpu-training-lifecycle` → `references/provider-research.md`). Missing support blocks that execution path while comparisons and research continue. Exact recovery capability gate: `gpu-training-lifecycle` → `references/gates.md#exact-recovery-capability-gate`.
+
+## Qualification
+Offline tests validate rendering, bad input rejection and manifest invariants. Live allocation, driver compatibility, storage durability, throughput and true preemption recovery are proven by the bounded first-qualification pilot of a stack (no separate canary), then guarded on every allocation by the image skill's job-start preflight. Keep billing evidence and estimate timestamps. Qualification and its reuse: SKILL step 6, [runbook](runbook.md) §1 and `gpu-training-lifecycle` → `references/operating-model.md#qualify-a-new-stack-once`. It writes under `qualify/<run>/` in the checkpoint bucket and a separate metrics run, never the run's own prefix or history.
+
+## Storage and monitoring gates
+Schema-v1 extensions are optional for legacy offline rendering, not optional live-launch evidence. Resolve checkpoint.provider to the GPU provider, checkpoint.region preferably to the GPU region, durable=true, storage_type=object-store or retained-volume, and resume_policy=latest-complete. Same-provider cross-region storage needs explicit data-locality/cost review; retained volumes must support the actual replacement worker’s placement and must not be deleted with it. The renderer mounts storage but does not implement restore, inject credentials or enforce these service properties.
+
+Metrics: record the researcher's choice (`monitoring.metrics_backend`, or `monitoring.wandb` for W&B) and pin its SDK in the image. Identity, secret and upload rules: `gpu-training-observe` → `references/wandb.md`.
+
+## Provider-native storage identifiers
+The renderer passes provider-native storage schemes (for example `s3://bucket/prefix`, or the chosen provider's scheme) to SkyPilot's file mounts unchanged, and SkyPilot resolves the endpoint. Training code that reads such a URI directly instead of the mount needs the provider's S3-compatible endpoint and profile from the project's provider research record. A successful parse proves neither access nor completeness; the COMMITTED marker covers completeness.
+
+## Actual launch evidence, not declarations
+Run the lifecycle validator with `--phase launch` before submission: unlike legacy planning validation/rendering, that gate requires the durable checkpoint declaration/provider/region/resume policy, an explicit metrics choice, and per tier either managed recovery with positive attempts, a spot capacity-wait bound and a notification channel (Standard) or the timeout/autodown cost bound (Minimal). Then establish the real evidence behind each field. The renderer remains offline/planning-only and is not a substitute for this strict check.
+
+Standard tier guard readiness: its start checks and [runbook](runbook.md) §4. The renderer's `timeout` that stops each allocation if the guard host dies: `gpu-training-lifecycle` → `references/operating-model.md#fixed-execution-and-responsibilities`. A JSON field or a promised guard is not deployment proof; unknown guard readiness blocks live launch.
+
+## Minimal tier: a plain on-demand cluster
+`tier: minimal` is for short, attended on-demand runs. The renderer emits a plain task without `job_recovery`, adds `resources.autostop: {idle_minutes: budget.autodown_idle_minutes, down: true}`, and wraps the argv in `timeout --signal=TERM --kill-after=120 <budget.max_worker_runtime_seconds>`. Autostop runs on the VM itself and terminates it through the provider API with the credentials SkyPilot places there by default, so the cluster tears itself down even when the API server, the laptop and the assistant are gone. If `remote_identity` was changed from the default, autodown may fail and the VM bills until someone runs `sky down`. The first Minimal run on a stack confirms in the provider's console or CLI that the VM is gone after the idle period. A worker deadline applies when one is set. The validator requires `max_runtime_hours` to exceed the timeout plus idle autodown (add the expected startup time, such as image pull and provisioning, yourself; the validator cannot know it), and `max_runtime_hours x ceiling_hourly_usd + controller_allowance <= total_limit`: that product is the run's cost bound. There is no managed-jobs controller, campaign guard or notification channel, and nothing restarts the run after a failure or preemption, so checkpoints still go to durable storage and a restart is a new approved launch that resumes from them. After launch, verify that `sky status` shows the autostop/autodown setting.
+
+## Instance shape
+If CPU/RAM/preset choice affects the quote or scientific contract, resolve the pinned catalog's exact `gpu.instance_type` and verify the rendered resources preserve it. It is mandatory evidence when the provider sells GPU counts only as fixed presets; absence does not silently imply the right CPU/RAM shape. Verify actual image, wrapper/interpreter and purchase mode after allocation before training.
+
+## SkyPilot version
+The SkyPilot version is chosen at the start of the project and kept for the run; its one-time start checks (guard SDK check, task parse, release-note skim for recovery, credential-upload and spot-request changes) are in `gpu-training-lifecycle` → `references/gates.md#skypilot-version-chosen-at-the-start-kept-for-the-run` and are not repeated per launch. The renderer writes the recovery strategy and `api_server_access: false` explicitly, so changed defaults there cannot move a run. Bake code and dependencies into the image rather than using `workdir` upload and `setup` installs, which would run on the GPU again at every recovery; use SkyPilot file mounts for data and checkpoints.
+
+## Region policy is a provider and user choice
+Fixed region (`allow_region_change=false`) renders `infra: provider/region` with `FAILOVER`. Multi-region recovery within the same provider is allowed only when the user chooses it and `recovery.region_change_evidence` records storage shared by every allowed region at zero cross-region transfer cost, covering checkpoint, dataset and image, with a source and check date (the lifecycle validator enforces the same rule). The renderer then emits `any_of` over exactly `recovery.allowed_regions` with `EAGER_NEXT_REGION`. Verify that the exact GPU preset exists in every allowed region; if it exists in only one, multi-region adds nothing. Spot-only and provider lock apply to every candidate.
+
+## Renderer scope
+`scripts/render_job.py` is a no-cloud helper that renders a starting point. It validates critical fields, derives use_spot only from purchase_model, emits JSON (valid YAML), and never launches anything. Its remote-URI checks are syntactic and do not certify durability. Supply the actual application command as a JSON argv array using `--argv-json`; the default is a failing placeholder. Adjust the rendered file only under the same manifest constraints.
+
+## Checkpoint storage verification
+Use selected-provider durable checkpoint storage independent of worker lifetime, preferably same-region. Verify the actual storage/account/region and deletion semantics rather than inferring the provider from an S3-compatible URI.
+
+## Pre-submission environment checks
+Use the SkyPilot version chosen at the start; `sky api info` confirms the client still matches the server. Verify target account/project, capacity/quotas, Docker/provider compatibility, storage mount permissions, TLS/auth, remaining budget and stale quote handling. Unsupported fields block launch until adapted and tested, not silently dropped. Image coverage and the job-start preflight: SKILL steps 3 and 5.
+
+## After submission
+Capture identity before tailing logs. Verify actual instance/provider/region/GPU/image and dataset/checkpoint run identity before costly training proceeds. Report launched, pending or blocked accurately, with actual tests and remaining unknowns. Continue with observation; do not declare success merely because a VM was allocated.

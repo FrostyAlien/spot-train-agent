@@ -1,0 +1,14 @@
+interface:
+  display_name: GPU Training Controller
+  short_description: Design an inexpensive, durable recovery control plane
+  default_prompt: Use $gpu-training-controller to plan a low-cost non-spot control
+    plane for my training.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

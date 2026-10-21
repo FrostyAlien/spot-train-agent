@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+.venv/
+venv/
+.pytest_cache/
+
+# Release ZIPs (built from a tag, attached to the release, never committed)
+*.zip
+dist/
+
+# Test output
+tests/linux/logs/
+
+# Secrets: never commit runtime secret files or credentials
+.env
+*.env
+secrets-env.sh
+
+# Local tool and OS files
+.claude/settings.local.json
+.vscode/
+.idea/
+.DS_Store
+
+# Maintainer's private records: kept on disk, never pushed
+CHANGELOG.md
+REVIEW.md
+examples/

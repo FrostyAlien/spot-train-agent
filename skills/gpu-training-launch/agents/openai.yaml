@@ -1,0 +1,14 @@
+interface:
+  display_name: GPU Training Launch
+  short_description: Preflight and launch within fixed placement and budget
+  default_prompt: Use $gpu-training-launch to prepare and preflight this approved
+    training launch.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

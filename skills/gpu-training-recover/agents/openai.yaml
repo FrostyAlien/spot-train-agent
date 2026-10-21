@@ -1,0 +1,14 @@
+interface:
+  display_name: GPU Training Recovery
+  short_description: Verify complete checkpoints and resume safely
+  default_prompt: Use $gpu-training-recover to diagnose and safely resume this interrupted
+    training run.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

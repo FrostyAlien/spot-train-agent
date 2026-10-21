@@ -1,0 +1,14 @@
+interface:
+  display_name: GPU Training Image
+  short_description: Prepare a pinned, portable training environment
+  default_prompt: Use $gpu-training-image to prepare my training image before renting
+    expensive GPUs.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

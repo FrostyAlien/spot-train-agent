@@ -1,0 +1,14 @@
+interface:
+  display_name: GPU Training Data
+  short_description: Prepare durable data, shards, and resumable cursors
+  default_prompt: Use $gpu-training-data to prepare versioned training data and a
+    reusable cache plan.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

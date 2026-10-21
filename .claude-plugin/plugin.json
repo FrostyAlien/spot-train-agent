@@ -1,0 +1,28 @@
+{
+  "name": "spot-train-agent",
+  "displayName": "Spot Train Agent",
+  "version": "0.9.4",
+  "description": "Let your coding agent run GPU training on spot instances: it launches the run, monitors progress and spend, recovers from preemption and cleans up.",
+  "author": {
+    "name": "Zirui Xiao",
+    "url": "https://github.com/FrostyAlien"
+  },
+  "homepage": "https://github.com/FrostyAlien/spot-train-agent",
+  "repository": "https://github.com/FrostyAlien/spot-train-agent",
+  "license": "MIT",
+  "keywords": [
+    "gpu",
+    "spot-instances",
+    "preemptible",
+    "training",
+    "monitoring",
+    "checkpointing",
+    "skypilot"
+  ],
+  "dependencies": [
+    {
+      "name": "skypilot",
+      "marketplace": "skypilot"
+    }
+  ]
+}

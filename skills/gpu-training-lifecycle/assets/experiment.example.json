@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "run_id": "research-run-001",
+  "state": "planning",
+  "tier": null,
+  "provider": null,
+  "region": null,
+  "code": {
+    "repo": null,
+    "commit": null
+  },
+  "gpu": {
+    "model": null,
+    "count": 8
+  },
+  "image": {
+    "reference": null,
+    "digest": null,
+    "registry_login": false
+  },
+  "dataset": {
+    "uri": null,
+    "version": null,
+    "mount_mode": null,
+    "qualify_uri": null
+  },
+  "checkpoint": {
+    "uri": null,
+    "run_id": "research-run-001",
+    "provider": null,
+    "region": null,
+    "durable": true,
+    "storage_type": "object-store",
+    "resume_policy": "latest-complete",
+    "mount_mode": "MOUNT_CACHED"
+  },
+  "budget": {
+    "currency": "USD",
+    "total_limit": null,
+    "planned_job_hours": null,
+    "controller_allowance": null,
+    "deadline_utc": null,
+    "ceiling_hourly_usd": null,
+    "free_without_vm": false,
+    "max_runtime_hours": null
+  },
+  "recovery": {
+    "enabled": true,
+    "allow_provider_change": false,
+    "allow_region_change": false,
+    "allow_on_demand": false,
+    "max_attempts": null,
+    "max_attempts_without_progress": 10,
+    "max_capacity_wait_minutes": 60,
+    "startup_allowance_minutes": 10,
+    "planned_drills": 0
+  },
+  "controller": {
+    "mode": null,
+    "state_uri": null
+  },
+  "approval": {
+    "status": "pending",
+    "mode": "gated",
+    "scope": []
+  },
+  "purchase_model": null,
+  "monitoring": {
+    "metrics_backend": null,
+    "wandb": {
+      "enabled": false,
+      "entity": null,
+      "project": null,
+      "run_id": "research-run-001",
+      "mode": "online"
+    },
+    "notify": {
+      "channel": null
+    }
+  }
+}
