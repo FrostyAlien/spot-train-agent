@@ -10,6 +10,11 @@ from pathlib import Path
 STATES = {'planning','ready','running','recovering','paused','completed','cancelled','failed'}
 HF_DATASET = re.compile(r'hf://datasets/[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9._-]+(/[^?#]*)?')
 SHUTDOWN_RESERVE_HOURS = (60 + 5 * 60) / 3600     # the guard's default poll plus shutdown reserve
+# Where the SkyPilot API server runs. The first three are the older names, still accepted.
+SELF_HOSTED = {'self-hosted', 'existing-host'}
+CONTROLLER_MODES = SELF_HOSTED | {'existing', 'provider-managed', 'local', 'remote-api-server', 'standalone-managed'}
+NOTIFY_FORMATS = ('text', 'slack', 'discord', 'json')    # observe skill: notify.py
+GUARD_MODES = ('none', 'external')
 
 REGION_EVIDENCE_COVERS={'checkpoint','dataset','image'}
 
@@ -79,8 +84,15 @@ def validate(d, phase='plan', locked=None):
     if d.get('purchase_model') not in ({'spot','on-demand'} if required else {None,'spot','on-demand'}): err('purchase_model must be spot or on-demand for launch')
     for path in ('provider','region','gpu.model','image.reference','image.digest','dataset.uri','dataset.version','checkpoint.uri'):
         text(path,required)
-    for path in ('controller.mode','controller.state_uri'):   # Minimal has no managed-jobs controller
-        text(path,required and not minimal)
+    text('controller.mode',required and not minimal)   # Minimal has no managed-jobs controller
+    # The controller state is the user's to keep only on a server they run.
+    text('controller.state_uri',required and not minimal and d.get('controller',{}).get('mode') in SELF_HOSTED)
+    ctl=d.get('controller') if isinstance(d.get('controller'),dict) else {}
+    endpoint=ctl.get('endpoint')
+    if endpoint is not None and (not isinstance(endpoint,str) or re.search(r'[@?#\s]',endpoint) or '://' in endpoint):
+        err('controller.endpoint is the server host (and port) only: no scheme, user, password or query')
+    if ctl.get('server_version') is not None and not (isinstance(ctl['server_version'],str) and ctl['server_version'].strip()):
+        err('controller.server_version must be the version string `sky api info` reports')
     count=field('gpu.count')
     if isinstance(count,bool) or not isinstance(count,int) or not 1 <= count <= 8: err('gpu.count must be integer 1..8 for this suite')
     if 'instance_type' in d['gpu']:
@@ -142,7 +154,8 @@ def validate(d, phase='plan', locked=None):
     if disk is not None and (not isinstance(disk,dict) or ('size_gb' in disk and (type(disk['size_gb']) is not int or not 20<=disk['size_gb']<=65536))):
         err('disk.size_gb must be an integer number of GB (the worker boot disk; SkyPilot default otherwise)')
     if required:
-        if not minimal and d.get('controller',{}).get('mode') not in {'existing-host','remote-api-server','standalone-managed'}: err('invalid controller mode')
+        if not minimal and d.get('controller',{}).get('mode') not in CONTROLLER_MODES:
+            err('controller.mode must be self-hosted, existing, provider-managed or local')
         digest=d.get('image',{}).get('digest')
         if not isinstance(digest,str) or not re.fullmatch(r'sha256:[0-9a-f]{64}',digest): err('image.digest must be an immutable sha256 digest')
     if not isinstance(field('approval.scope'),list): err('approval.scope must be an array, never authorization itself')
@@ -167,7 +180,7 @@ def validate(d, phase='plan', locked=None):
             err('launch requires budget.ceiling_hourly_usd: the node on-demand rate, the most a price-following spot VM can bill')
         notify=d.get('monitoring',{}).get('notify') if isinstance(d.get('monitoring'),dict) else None
         if not minimal and (not isinstance(notify,dict) or not isinstance(notify.get('channel'),str) or not notify['channel'].strip()):
-            err('launch requires monitoring.notify.channel so guard stops reach a person (no secrets in this file)')
+            err('launch requires monitoring.notify.channel so stops reach a person (no secrets in this file)')
         b=d['budget']
         def num(v): return isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v)
         if minimal:
@@ -188,8 +201,8 @@ def validate(d, phase='plan', locked=None):
             planned,total,allowance=b.get('planned_job_hours'),b.get('total_limit'),b.get('controller_allowance') or 0
             if num(planned) and num(total) and num(ceiling) and ceiling>0 and num(allowance):
                 runway=(total-allowance)/ceiling-SHUTDOWN_RESERVE_HOURS
-                if runway<planned: err(f'guard runway {runway:.2f} h at the ceiling is shorter than budget.planned_job_hours {planned}: '
-                                       'the guard would stop the job early; raise total_limit or plan less')
+                if runway<planned: err(f'budget runway {runway:.2f} h at the ceiling is shorter than budget.planned_job_hours {planned}: '
+                                       "the run's limits would stop the job early; raise total_limit or plan less")
     cp=d['checkpoint']
     for key in ('provider','region'):
         if key in cp:
@@ -233,6 +246,13 @@ def validate(d, phase='plan', locked=None):
         else:
             if monitoring.get('metrics_backend') is not None and not (isinstance(monitoring['metrics_backend'],str) and monitoring['metrics_backend'].strip()):
                 err('monitoring.metrics_backend must be a nonempty name (e.g. mlflow, tensorboard, none)')
+            if monitoring.get('guard','none') not in GUARD_MODES:
+                err('monitoring.guard must be none (limits in the worker) or external (the optional campaign guard too)')
+            notify=monitoring.get('notify')
+            if isinstance(notify,dict) and notify.get('format','text') not in NOTIFY_FORMATS:
+                err('monitoring.notify.format must be one of '+', '.join(NOTIFY_FORMATS)+' (the URL is a secret, never here)')
+            if isinstance(notify,dict) and set(notify)-{'channel','format'}:
+                err('monitoring.notify holds only channel and format; the URL is the NOTIFY_URL secret')
             if 'wandb' in monitoring and not isinstance(monitoring['wandb'],dict): err('monitoring.wandb must be an object')
             elif 'wandb' in monitoring:
                 w=monitoring['wandb']
@@ -258,31 +278,22 @@ def validate(d, phase='plan', locked=None):
                 # Expanded permission or budget is a new review, not silent recovery.
                 if d.get('recovery')!=old_recovery: err('locked recovery policy changed; explicit review required')
             if d.get('budget')!=locked.get('budget'): err('locked budget changed; explicit review required')
+            old_ctl=locked.get('controller') if isinstance(locked.get('controller'),dict) else {}
+            if old_ctl.get('server_version') is not None and ctl.get('server_version')!=old_ctl['server_version']:
+                err('controller.server_version changed: rerun the start checks (requalify only if the release notes touch recovery)')
     return errors
 
 def warnings(d, now=None):
-    """Advisory only: what bounds spend if the guard host dies (the worker's runtime timeout, per
-    allocation, and the deadline when one is set)."""
-    import time
+    """Advisory only: spend the run's limits cannot see. The worker enforces the budget, the deadline and the
+    allocation limits itself; without the optional guard nothing counts waiting after a preemption until the
+    next start."""
     out=[]
     b=d.get('budget') if isinstance(d.get('budget'),dict) else {}
-    deadline,ceiling,total=b.get('deadline_utc'),b.get('ceiling_hourly_usd'),b.get('total_limit')
-    numbers=all(isinstance(v,(int,float)) and not isinstance(v,bool) for v in (ceiling,total))
-    if d.get('tier')!='minimal' and deadline is None and numbers and ceiling>0:
-        runway=max(0.0,(total-(b.get('controller_allowance') or 0))/ceiling-SHUTDOWN_RESERVE_HOURS)
-        out.append(f'no deadline: only the guard bounds total spend; if the guard host dies, the worker\'s runtime timeout ends '
-                   f'each allocation after {runway:.1f} h (the runway at the ceiling) and every recovery starts a new one: keep the guard host reliable')
-    if d.get('tier')!='minimal' and isinstance(deadline,str) and numbers:
-        try:
-            from datetime import datetime,timezone
-            end=datetime.fromisoformat(deadline.rstrip('Z')).replace(tzinfo=timezone.utc).timestamp()
-        except ValueError:
-            return out
-        hours=max(0.0,(end-(now if now is not None else time.time()))/3600)
-        worst=hours*ceiling+(b.get('controller_allowance') or 0)
-        if worst>total:
-            out.append(f'if the guard host dies, the worker deadline bounds total spend: up to {worst:.2f} {b.get("currency","USD")} '
-                       f'({hours:.1f} h to the deadline at the ceiling) versus total_limit {total}; keep the guard host reliable or set an earlier deadline')
+    mon=d.get('monitoring') if isinstance(d.get('monitoring'),dict) else {}
+    if d.get('tier')!='minimal' and mon.get('guard','none')=='none' and b.get('free_without_vm') is not True:
+        out.append('budget.free_without_vm is not true: waiting for capacity after a preemption may be billed, and without '
+                   'the guard it is counted only at the next start; set monitoring.guard to external to bound it, or '
+                   'confirm from the provider research that only running VMs bill')
     return out
 
 def main():

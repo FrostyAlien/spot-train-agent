@@ -57,7 +57,9 @@
   },
   "controller": {
     "mode": null,
-    "state_uri": null
+    "state_uri": null,
+    "endpoint": null,
+    "server_version": null
   },
   "approval": {
     "status": "pending",
@@ -75,7 +77,9 @@
       "mode": "online"
     },
     "notify": {
-      "channel": null
-    }
+      "channel": null,
+      "format": "text"
+    },
+    "guard": "none"
   }
 }
