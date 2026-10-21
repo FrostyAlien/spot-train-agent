@@ -1,19 +1,19 @@
 ---
 name: gpu-training-observe
-description: Monitor a running GPU training campaign for useful progress, checkpoint durability, spending, fixed placement and recovery health, and reconcile uncertain job state. Use when a job is running, stuck, recovering or preempted, when asked how the training is going or how much budget is left, or to install or read the campaign guard.
+description: Monitor a running GPU training campaign for useful progress, checkpoint durability, spending, fixed placement and recovery health, and reconcile uncertain job state. Use when a job is running, stuck, recovering or preempted, when asked how the training is going or how much budget is left, for the worker's notifications, or to install or read the optional campaign guard.
 ---
 
 # GPU training observation
 
-Install or read the campaign guard, monitor the running campaign and reconcile uncertain job state. Routine telemetry, checkpointing and approved enforcement run in deterministic scripts and the campaign guard, never a resident AI agent. Bundled scripts and references are relative to this skill's directory (`<skill-dir>`); call helpers by absolute path with absolute project paths.
+Monitor the running campaign, read the worker's notices and limits, install or read the optional campaign guard, and reconcile uncertain job state. Routine telemetry, checkpointing and approved enforcement run in deterministic scripts on the worker (and the guard when used), never a resident AI agent. Bundled scripts and references are relative to this skill's directory (`<skill-dir>`); call helpers by absolute path with absolute project paths.
 
 ## Inputs
 `experiment.json`, launch's outputs (`campaign.json`, `guard/guard-job<ID>.json`) and the launch record, controller version lock, durable checkpoint manifest, actual approval scope, prior observations.
 
 ## Steps
-### Campaign guard (installed once, attached per job by launch)
-SkyPilot waits for spot capacity indefinitely and has no campaign budget, so `scripts/campaign_guard.py` (or the user's existing equivalent) enforces the approved limits on managed jobs (Standard tier); a Minimal-tier cluster bounds itself with its run timeout and autodown. On the worker, the stall watchdog (`scripts/progress_watch.py`) ends a hung run (`STALL`, stacks, exit 93); the guard notifies it and cancels a wedged job ([guard](references/guard.md#stall-watchdog)).
-1. The guard runs on the always-on control host, independent of the GPU worker, against the submitter's SkyPilot API server in the same active workspace as the job, with a login allowed to cancel it. A laptop suits only an attended, kept-awake pilot, where the worker's runtime timeout is the last defence.
+### Limits and the optional campaign guard
+SkyPilot waits for spot capacity indefinitely and has no campaign budget. The worker enforces the run's budget, deadline and attempt limits at every start and sends notices itself (`scripts/notify.py`); a Minimal-tier cluster bounds itself with its run timeout and autodown. On the worker, the stall watchdog (`scripts/progress_watch.py`) ends a hung run (`STALL`, stacks, exit 93) and notifies it. The campaign guard (`scripts/campaign_guard.py`) is optional (`monitoring.guard: external`): it adds the capacity wait after a preemption, a billed wait's spend, a timed fallback and the wedged-VM check ([guard](references/guard.md#campaign-guard)).
+1. With the guard: it runs on the control host, or without one on a machine that stays awake and online for the campaign (else a small CPU VM), independent of the GPU worker, against the submitter's SkyPilot API server in the same active workspace as the job, with a login allowed to cancel it.
 2. At install and after any SkyPilot upgrade, run its self-test and SDK check (part of the lifecycle start checks):
    `~/sky-venv/bin/python <skill-dir>/scripts/campaign_guard.py --self-test` and `--check-sdk`
 3. The launch runbook §4 attaches it to each job (`--init-config`, a first `--once` tick that must observe the job, then `--loop` under systemd; both recorded in the launch evidence). Fields and behaviour: [guard.md](references/guard.md#campaign-guard).

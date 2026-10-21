@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Reference campaign guard: enforces a spend ceiling, attempts, capacity wait and an optional deadline.
 
-SkyPilot Managed Jobs will wait for spot capacity indefinitely and has no campaign budget.
+SkyPilot Managed Jobs will wait for spot capacity indefinitely and has no campaign budget. Since v0.10 the
+worker enforces the run's limits itself (checkpoint_marker.py limits); this guard is optional and, with
+worker_limits (set by --init-config when the contract's monitoring.guard is external), leaves the deadline and
+the attempt limits to the worker and adds what no worker can see: waiting for capacity after a preemption, the
+spend of billed waits, a timed on-demand fallback, a wedged VM and notices while no VM exists.
 This guard runs OUTSIDE the GPU worker (cron/systemd timer or --loop) on an always-on host,
 persists its ledger, and cancels the managed job (then notifies) when an approved limit is hit.
 It watches managed jobs only; a plain `sky launch` cluster (Minimal tier) is bounded by its own
@@ -56,7 +60,8 @@ progress is never stopped by a count (an unreadable log never counts; a commit i
 before a preemption can be missed, which counts that allocation as stalled).
 Billing rules: with free_without_vm (the provider bills compute only while a VM exists), PENDING time is
 free, and STARTING/RECOVERING time is free while vm_count_cmd (the project's hook, given the cluster
-name) reports no VM; anything unknown is charged, and so is any time two jobs may be alive after a
+name) reports no VM; once per allocation the hook must also find the running job's VM, or (a wrong hook or
+cluster name) nothing counts as free from then on and the user is told once; anything unknown is charged, and so is any time two jobs may be alive after a
 fallback. A provisioning attempt that creates and deletes a VM between two polls is not seen (seconds).
 Capacity wait = continuous observed PENDING/SUBMITTED/STARTING/RECOVERING time beyond
 startup_allowance_minutes (normal provisioning, image pull, mounts and data copy, measured once per
@@ -103,7 +108,7 @@ OPTIONAL = ('deadline_utc', 'max_attempts', 'reserved_usd', 'poll_seconds', 'shu
             'fallback', 'startup_allowance_minutes', 'spent_before_usd', 'attempts_before',
             'graceful_cancel_seconds', 'notify_milestones', 'sdk_timeout_seconds',
             'max_attempts_without_progress', 'free_without_vm', 'vm_count_cmd', 'notify_evals',
-            'progress_period_seconds', 'wedged_grace_minutes', 'log_read_seconds')
+            'progress_period_seconds', 'wedged_grace_minutes', 'log_read_seconds', 'worker_limits')
 HISTORY_MAX = 200
 FALLBACK_TRIES = 3
 SDK_TIMEOUT_SECONDS = 120
@@ -224,9 +229,10 @@ def _remember(s: dict, now: float, status: str | None, obs: dict | None, cfg: di
         s['last_status'] = status
 
 
-def _free(cfg, obs) -> bool:
-    """No compute is billed for this observation under the provider's billing rules (unknown = billed)."""
-    if not cfg.get('free_without_vm') or obs is None:
+def _free(cfg, obs, s=None) -> bool:
+    """No compute is billed for this observation under the provider's billing rules (unknown = billed). Once
+    the VM hook found no VM for a running job (a wrong hook or cluster name), nothing is free any more."""
+    if not cfg.get('free_without_vm') or obs is None or (s or {}).get('vm_hook_broken'):
         return False
     return obs['status'] in NO_VM_STATUSES or (obs['status'] in WAITING and obs.get('vms') == 0)
 
@@ -291,7 +297,11 @@ def decide(cfg: dict, state: dict, obs: dict | None, now: float) -> tuple[list, 
     submitted = (obs or {}).get('submitted_at')
     first_obs = obs is not None and not s['observed']
     two_jobs = s.get('replaced_job') is not None or s.get('double_charge_once', False)
-    free_now = _free(cfg, obs) and not two_jobs        # a replaced primary may hold a VM: never free then
+    if obs is not None and obs.get('vms_running') == 0 and not s.get('vm_hook_broken'):
+        s['vm_hook_broken'] = True                     # a running job has a VM: the hook or the name is wrong
+        actions.append(('notify', 'the VM hook found no VM for the running job: waiting is charged from now on; '
+                                  'check the hook and the cluster name'))
+    free_now = _free(cfg, obs, s) and not two_jobs     # a replaced primary may hold a VM: never free then
     if first_obs:                                      # charge from submission, not from the guard's start,
         s['observed'] = True                           # even when the first ticks were blind; skip only when
         never_ran = (obs['status'] in NO_VM_STATUSES and not obs.get('recovery_count'))   # no VM ever existed
@@ -355,16 +365,17 @@ def decide(cfg: dict, state: dict, obs: dict | None, now: float) -> tuple[list, 
     spend = _base_usd(cfg) + hourly * s['billable_seconds'] / 3600
     s['spend_upper_usd'] = round(spend, 4)
     reasons = []
-    if cfg.get('deadline_utc') is not None and now >= parse_utc(cfg['deadline_utc']):
+    worker = cfg.get('worker_limits', False)           # the worker enforces deadline and attempts at every start
+    if not worker and cfg.get('deadline_utc') is not None and now >= parse_utc(cfg['deadline_utc']):
         reasons.append('campaign deadline reached')
     if spend + hourly * _reserve_hours(cfg) >= cfg['budget_usd']:
         reasons.append(f'spend upper bound {spend:.2f} + shutdown reserve reaches budget {cfg["budget_usd"]}')
-    if cfg.get('max_attempts') is not None and s.get('attempts', 1) > cfg['max_attempts']:
+    if not worker and cfg.get('max_attempts') is not None and s.get('attempts', 1) > cfg['max_attempts']:
         reasons.append(f"attempts {s['attempts']} exceed {cfg['max_attempts']}")
     if s.get('wedged_since') is not None and now - s['wedged_since'] >= 60 * cfg.get('wedged_grace_minutes', 15):
         reasons.append(f"worker wedged: no PROGRESS line for {(now - s['progress_at']) / 60:.0f} min")
     stalled_max = cfg.get('max_attempts_without_progress', DEFAULT_ATTEMPTS_WITHOUT_PROGRESS)
-    if s.get('stalled', 0) >= stalled_max:
+    if not worker and s.get('stalled', 0) >= stalled_max:
         reasons.append(f"{s['stalled']} allocations in a row ended without a new checkpoint (limit {stalled_max})")
     waited = 0.0 if s['wait_started'] is None else (now - s['wait_started']) / 60
     wait_min = max(0.0, waited - cfg.get('startup_allowance_minutes', 0))    # beyond a normal start
@@ -543,7 +554,9 @@ def find_launched(name: str, after_job: int, timeout=SDK_TIMEOUT_SECONDS):
     name carries the run id): a launch the API server accepted although the guard saw an error, or died
     before recording it. Adopt it, never relaunch. (submitted_at stays empty while a job is PENDING.)"""
     from sky import jobs
-    result = _get(lambda: jobs.queue_v2(refresh=False, all_users=True, job_ids=None,
+    # The guard launched the fallback with its own login: only its own jobs are candidates (on a shared
+    # server another user's job can carry the same name).
+    result = _get(lambda: jobs.queue_v2(refresh=False, all_users=False, job_ids=None,
                                         fields=['job_id', 'job_name', 'status', 'submitted_at']), timeout)
     found = [int(r['job_id']) for r in _records(result)
              if r.get('job_name') == name and _status(r) not in TERMINAL and int(r['job_id']) > int(after_job)]
@@ -744,6 +757,13 @@ def _tick(cfg, path) -> list:
         status = obs['status']
         if cfg.get('free_without_vm') and cfg.get('vm_count_cmd') and status in WAITING - NO_VM_STATUSES:
             obs['vms'] = count_vms(cfg['vm_count_cmd'], cluster_name(obs, state['job_id']))
+        rc = int(obs.get('recovery_count') or 0)
+        if (cfg.get('free_without_vm') and cfg.get('vm_count_cmd') and status == 'RUNNING'
+                and state.get('vm_checked_rc') != rc and not state.get('vm_hook_broken')):
+            # Once per allocation: the hook must find the running job's VM, or every wait would count as free.
+            vms = count_vms(cfg['vm_count_cmd'], cluster_name(obs, state['job_id']))
+            if vms is not None:
+                obs['vms_running'], state['vm_checked_rc'] = vms, rc
         # Read the log on every RUNNING tick (commits, evaluations, the watchdog's lines), and only then: for
         # a job in any other non-terminal state this SkyPilot's tail_logs(follow=False) waits for it to run
         # again and never returns.
@@ -848,6 +868,7 @@ def init_config(m: dict, job_id: int, workdir: Path, notify_cmd=None, attended=F
             raise ValueError('recovery.max_capacity_wait_minutes is required for a spot run')
         wait = DEFAULT_ON_DEMAND_WAIT_MINUTES
     absolute = r.get('max_attempts')
+    worker = isinstance(m.get('monitoring'), dict) and m['monitoring'].get('guard') == 'external'
     cfg = {'job_id': int(job_id), **({'deadline_utc': b['deadline_utc']} if b.get('deadline_utc') is not None else {}),
            **({'max_attempts': int(absolute) + int(r.get('planned_drills', 0))} if absolute is not None else {}),
            'max_attempts_without_progress': int(r.get('max_attempts_without_progress', DEFAULT_ATTEMPTS_WITHOUT_PROGRESS)),
@@ -855,7 +876,9 @@ def init_config(m: dict, job_id: int, workdir: Path, notify_cmd=None, attended=F
            'budget_usd': b['total_limit'], 'ceiling_hourly_usd': b['ceiling_hourly_usd'],
            'reserved_usd': b.get('controller_allowance') or 0.0, 'spent_before_usd': spent,
            'attempts_before': attempts, 'poll_seconds': 60, 'shutdown_reserve_minutes': 5,
-           'graceful_cancel_seconds': 120, 'max_blind_minutes': 15, 'notify_milestones': True, 'notify_evals': True,
+           'graceful_cancel_seconds': 120, 'max_blind_minutes': 15, 'notify_milestones': True,
+           # With the contract's guard set to external the worker enforces its limits too and sends the evaluations.
+           'worker_limits': worker, 'notify_evals': not worker,
            **({'progress_period_seconds': m['watchdog']['progress_period_seconds']}
               if isinstance(m.get('watchdog'), dict) and 'progress_period_seconds' in m['watchdog'] else {}),
            'state_path': str(workdir / 'guard' / f'state-job{job_id}.json')}

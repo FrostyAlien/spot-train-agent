@@ -2,8 +2,17 @@
 Items marked *(offline only)* have not run in a live test yet (`VALIDATION.md`).
 
 ## Campaign guard
-`scripts/campaign_guard.py` runs on the control host: `--loop` under systemd (launch runbook §4), or a cron/systemd
-timer with `--once`. It looks the job up by id across SkyPilot users, so it works from its own host.
+Optional since v0.10: the worker enforces the run's budget, deadline and attempt limits itself (recover
+`references/contract.md#4-crash-safe-checkpoint-publication-on-a-skypilot-bucket-mount`, item 6) and sends the
+notices. Attach the guard when the contract's `monitoring.guard` is `external`: it adds what no worker can see,
+waiting for capacity after a preemption, the spend of a billed wait, a timed on-demand fallback, a wedged VM and
+notices while no VM exists. `--init-config` then sets `worker_limits`: the guard leaves the deadline and the attempt
+limits to the worker and keeps its outside spend count, the capacity wait, the fallback and the wedge check, and it
+does not forward evaluations (the worker does). Whichever limit comes first stops the run.
+
+`scripts/campaign_guard.py` runs on the control host, or without one on a machine that stays awake and online for
+the whole campaign (else a small CPU VM): `--loop` under systemd (launch runbook §4), or a cron/systemd timer with
+`--once`. It looks the job up by id across SkyPilot users, so it works from its own host.
 - **Config:** `--init-config` writes the config from the contract and the campaign ledger (`campaign.json`);
   `--dry-run` prints the runway for the approval. The fields:
   - `deadline_utc`: optional, none by default (the budget is the hard stop); when set, the guard cancels at it.
@@ -33,7 +42,9 @@ timer with `--once`. It looks the job up by id across SkyPilot users, so it work
 - **Billing rules** *(offline only)*: with `budget.free_without_vm` (from the provider research: compute billed only while a VM
   exists), PENDING time is free, and STARTING/RECOVERING time is free while the project's `vm_count_cmd` (its
   `hook_instance_ids`) reports no VM for the job's cluster. An unknown answer, blind time, RUNNING and any time a
-  replaced primary may still be alive after a fallback are charged.
+  replaced primary may still be alive after a fallback are charged. Once per allocation the hook must also find the
+  running job's VM: when it finds none, the hook or the cluster name is wrong, the user is told once and no wait
+  counts as free from then on.
 - **Cancel** *(offline only)*: at a limit (budget, attempts, capacity wait, deadline) the guard cancels gracefully
   first (`graceful_cancel_seconds`, within the shutdown reserve, lets queued cached-mount uploads finish; a plain
   cancel or a preemption does not wait), then plain on later ticks. It cancels only the job it tracks (and the
@@ -58,7 +69,8 @@ timer with `--once`. It looks the job up by id across SkyPilot users, so it work
   maximum, for example while the guard was blind, cancels instead), and waiting that long at the ceiling must fit
   the budget; the guard refuses a config whose fallback could never fire. It records the fallback's start, then
   launches it with secrets re-read from `fallback.secrets_cmd`. A launch the API server accepted but did not confirm
-  (lost reply, guard restart) is found by name and adopted, never repeated. The waiting primary is cancelled only
+  (lost reply, guard restart) is found by name among the guard's own jobs (on a shared server another user's job can
+  carry the same name) and adopted, never repeated. The waiting primary is cancelled only
   once the fallback is observed alive; a fallback that ends at once returns the guard to the primary, and a failed
   launch keeps the primary (three tries). The fallback job counts as an attempt and is watched under the same
   limits.
