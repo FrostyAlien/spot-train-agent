@@ -34,7 +34,7 @@ Selected offer or "no suitable offer"; all-in estimate/range and unknowns; quote
 - Never infer purchasing authority from a recommendation, manifest, prior experiment or price ceiling. Query without purchasing, saving credentials or accepting terms. No paid calibration run without authority.
 - **Purchase mode** (lifecycle spot-only default): set `purchase_model` before launch, never silently; no automatic spot-to-on-demand fallback (an explicit initial on-demand run stays on-demand; ask about a pre-approved fallback during planning).
 - **Provider lock** (lifecycle gate): provider and region stay fixed once a run starts (`recovery.allow_provider_change` stays false). Never migrate or reselect a running experiment: report the authorized recovery options or ask for a new experiment decision; a provider move is a separately approved successor experiment.
-- Keep the controller on separate inexpensive non-spot CPU infrastructure.
+- Keep the controller on separate inexpensive non-spot CPU infrastructure, or use an existing or provider-managed SkyPilot server. The `controller` cost category covers a control host, a server fee, the jobs-controller VM a local server creates, and short-lived build or data VMs.
 - Historical spot support is no live capability guarantee; compare on-demand and interruptible offers only where current product and adapter support are verified.
 
 ## References
