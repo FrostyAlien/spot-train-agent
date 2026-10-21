@@ -653,6 +653,15 @@ class LimitsTests(unittest.TestCase):
                       free_without_vm=True, startup_allowance_minutes=0)
         self.assertGreaterEqual(r['spend_upper_usd'], round((60 + 600 + 600) / 3600, 2))   # a1's span counted too
 
+    def test_a_start_stopped_by_a_limit_does_not_count_on_relaunch(self):
+        self.start('a1')
+        self.start('a2')
+        cm.journal(self.run, 'a3', 'preflight')
+        cm.journal(self.run, 'a3', 'limit', {'reached': 'no_progress'})   # stopped before training
+        self.start('a4')                                                 # the relaunch with a raised limit
+        r = self.limits(max_attempts_without_progress=3)
+        self.assertEqual((r['allocations'], r['allocations_without_progress'], r['limit']), (3, 2, None))
+
     def test_a_capped_start_that_trained_still_counts(self):
         cm.journal(self.run, 'a1', 'preflight')
         cm.journal(self.run, 'a1', 'price_cap', {'state': 'switched'})

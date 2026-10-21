@@ -30,7 +30,7 @@ is unproven; report it, never paper over it. `FINISH-JOURNAL` lines are the line
 the report. `FINISH-PARTIAL <dir>` lines are checkpoint directories without a marker (saves cut off by a
 preemption): list them, with the checkpoints older than the final one, in the inventory below.
 
-**A run without FINAL.json** *(offline only)* (stalled with exit 93, cancelled, crashed): the verify task still
+**A run without FINAL.json** *(offline only)* (stalled with exit 93, cancelled, crashed, or stopped by a budget or attempt limit and not continued): the verify task still
 prints the `FINISH-PRUNE`, `FINISH-JOURNAL` (the lineage) and `FINISH-PARTIAL` lines, then `FINISH no readable
 FINAL.json` and exit 3. Take the outcome from the observe runbook's triage (status, exit code, the `STALL` line).
 The run's last durable state is the newest directory in `FINISH-PRUNE`'s `keep` list: complete by presence (its
