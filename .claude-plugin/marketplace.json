@@ -1,6 +1,6 @@
 {
-  "name": "spot-train-agent",
-  "description": "Spot Train Agent: agent skills for GPU training on spot instances",
+  "name": "spot-trainer",
+  "description": "SpotTrainer: agent skills for GPU training on spot instances",
   "owner": {
     "name": "Zirui Xiao",
     "url": "https://github.com/FrostyAlien"
@@ -10,7 +10,7 @@
   ],
   "plugins": [
     {
-      "name": "spot-train-agent",
+      "name": "spot-trainer",
       "source": "./",
       "description": "Let your coding agent run GPU training on spot instances: it launches the run, monitors progress and spend, recovers from preemption and cleans up."
     }

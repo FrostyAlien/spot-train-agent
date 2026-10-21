@@ -1,10 +1,10 @@
 # Official SkyPilot skill (required)
 
-Spot Train Agent runs on SkyPilot, and its skills hand SkyPilot CLI, YAML, SDK and diagnostic details to SkyPilot's official `skypilot` skill instead of copying them. Install it together with this suite.
+SpotTrainer runs on SkyPilot, and its skills hand SkyPilot CLI, YAML, SDK and diagnostic details to SkyPilot's official `skypilot` skill instead of copying them. Install it together with this suite.
 
 - **Source:** https://github.com/skypilot-org/skypilot, path `agent/skills/skypilot` (SkyPilot contributors, Apache-2.0). This repository does not redistribute it.
-- **Claude Code:** `.claude-plugin/plugin.json` declares `skypilot@skypilot` as a dependency and `.claude-plugin/marketplace.json` allows that marketplace, so installing Spot Train Agent installs it once SkyPilot's marketplace is added. The plugin does not load without it. Commands: [INSTALL.md](INSTALL.md#2a-claude-code-install-the-plugins).
-- **Codex plugin:** Codex does not install plugin dependencies, so install SkyPilot's `skypilot@skypilot` plugin before Spot Train Agent ([INSTALL.md](INSTALL.md#2b-codex-install-the-plugins)).
+- **Claude Code:** `.claude-plugin/plugin.json` declares `skypilot@skypilot` as a dependency and `.claude-plugin/marketplace.json` allows that marketplace, so installing SpotTrainer installs it once SkyPilot's marketplace is added. The plugin does not load without it. Commands: [INSTALL.md](INSTALL.md#2a-claude-code-install-the-plugins).
+- **Codex plugin:** Codex does not install plugin dependencies, so install SkyPilot's `skypilot@skypilot` plugin before SpotTrainer ([INSTALL.md](INSTALL.md#2b-codex-install-the-plugins)).
 - **Copied skill folders (Codex in one project, other hosts):** copy `agent/skills/skypilot` next to the nine skills, with SkyPilot's `LICENSE` ([INSTALL.md](INSTALL.md#2c-codex-in-one-project-other-hosts-or-no-plugins-copy-the-skill-folders)).
 - **Docs:** https://docs.skypilot.ai/en/latest/getting-started/skill.html
 

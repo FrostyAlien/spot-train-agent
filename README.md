@@ -1,4 +1,4 @@
-# Spot Train Agent
+# SpotTrainer
 
 Let your coding agent run your model training on cheap spot (preemptible) GPU instances. It picks a GPU offer, launches the run, monitors progress and spend, brings the run back after a preemption, and cleans up at the end. You approve what costs money; the agent does the rest.
 
@@ -11,7 +11,7 @@ Version 0.9.5 • [MIT](LICENSE) • Works with Claude Code, Codex and other hos
 Ask your agent:
 
 ```text
-Install Spot Train Agent from https://github.com/FrostyAlien/spot-train-agent into this project, following its INSTALL.md.
+Install SpotTrainer from https://github.com/FrostyAlien/spot-trainer into this project, following its INSTALL.md.
 ```
 
 [INSTALL.md](INSTALL.md) tells the agent what to ask, which commands to run for Claude Code or Codex, how to check the result and how to start. To do it yourself:
@@ -20,7 +20,7 @@ Install Spot Train Agent from https://github.com/FrostyAlien/spot-train-agent in
 
   ```sh
   claude plugin marketplace add https://github.com/skypilot-org/skypilot.git --sparse .claude-plugin agent --scope project
-  claude plugin install spot-train-agent --marketplace https://github.com/FrostyAlien/spot-train-agent.git --scope project
+  claude plugin install spot-trainer --marketplace https://github.com/FrostyAlien/spot-trainer.git --scope project
   ```
 
 - **Codex** (CLI 0.162.1 or later, every project): Codex does not install plugin dependencies, so install SkyPilot's plugin first, then this one.
@@ -28,8 +28,8 @@ Install Spot Train Agent from https://github.com/FrostyAlien/spot-train-agent in
   ```sh
   codex plugin marketplace add https://github.com/skypilot-org/skypilot.git --sparse .claude-plugin --sparse agent
   codex plugin add skypilot@skypilot
-  codex plugin marketplace add https://github.com/FrostyAlien/spot-train-agent.git
-  codex plugin add spot-train-agent@spot-train-agent
+  codex plugin marketplace add https://github.com/FrostyAlien/spot-trainer.git
+  codex plugin add spot-trainer@spot-trainer
   ```
 
 - **Codex in one project, or Claude Code without plugins:** copy the nine folders under [`skills/`](skills/) and SkyPilot's [`agent/skills/skypilot`](https://github.com/skypilot-org/skypilot/tree/master/agent/skills/skypilot) into `.agents/skills/` (Codex) or `.claude/skills/` (Claude Code) in your project, each folder whole. Your agent does this from the prompt above.
@@ -52,7 +52,7 @@ From your training repository, ask in plain words:
 Plan a spot training run for this repository.
 ```
 
-In Claude Code, `/spot-train-agent:start` does the same and continues a run that is already in progress.
+In Claude Code, `/spot-trainer:start` does the same and continues a run that is already in progress.
 
 The agent reads your repository and asks its intake questions once: budget, GPU type and count, provider, where the data is, how you want to be notified and how much it may do without asking. Then it works through the run:
 
@@ -174,7 +174,7 @@ Test details: [VALIDATION.md](VALIDATION.md).
 skills/<name>/          the nine skills: SKILL.md, references/, scripts/, assets/, agents/openai.yaml (Codex UI metadata)
 tests/                  offline tests per skill, root release checks, tests/linux/ watchdog scenarios in Docker
 .claude-plugin/         Claude Code plugin and marketplace manifests
-commands/start.md       the plugin's /spot-train-agent:start shortcut
+commands/start.md       the plugin's /spot-trainer:start shortcut
 INSTALL.md              install and first-use steps for agents
 OFFICIAL_SKYPILOT.md    the required official SkyPilot skill and how it fits
 VALIDATION.md, SKILL_INDEX.md, SHA256SUMS

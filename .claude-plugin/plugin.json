@@ -1,14 +1,14 @@
 {
-  "name": "spot-train-agent",
-  "displayName": "Spot Train Agent",
+  "name": "spot-trainer",
+  "displayName": "SpotTrainer",
   "version": "0.9.5",
   "description": "Let your coding agent run GPU training on spot instances: it launches the run, monitors progress and spend, recovers from preemption and cleans up.",
   "author": {
     "name": "Zirui Xiao",
     "url": "https://github.com/FrostyAlien"
   },
-  "homepage": "https://github.com/FrostyAlien/spot-train-agent",
-  "repository": "https://github.com/FrostyAlien/spot-train-agent",
+  "homepage": "https://github.com/FrostyAlien/spot-trainer",
+  "repository": "https://github.com/FrostyAlien/spot-trainer",
   "license": "MIT",
   "keywords": [
     "gpu",

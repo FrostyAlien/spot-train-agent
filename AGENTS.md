@@ -8,7 +8,7 @@ The project is early stage (pre-1.0). Today the skills cover one node with up to
 
 - `skills/<name>/` is the product: nine skills installed into users' projects. Each has `SKILL.md` (the router), `references/` (read on demand), optional `scripts/` (stdlib Python helpers), `assets/` (examples, icon) and `agents/openai.yaml` (Codex UI metadata only).
 - `tests/` is never installed. `tests/<skill>/` holds unit tests for that skill's scripts; root `tests/test_*.py` are release checks (skill layout, links, runbook commands); `tests/linux/` runs the stall watchdog in Docker.
-- `commands/start.md` is the plugin's `/spot-train-agent:start` shortcut into the lifecycle skill (plugin only; copied skills start from plain words).
+- `commands/start.md` is the plugin's `/spot-trainer:start` shortcut into the lifecycle skill (plugin only; copied skills start from plain words).
 - `.claude-plugin/` makes the repository a Claude Code plugin and its own marketplace (`source: "./"`, skills from `skills/`). The plugin depends on SkyPilot's official `skypilot@skypilot` plugin (allowed through `allowCrossMarketplaceDependenciesOn`), which is required. Codex installs the same plugin from `.claude-plugin/marketplace.json` but skips the dependency, so INSTALL.md has Codex users install `skypilot@skypilot` first. `INSTALL.md` is the install guide written for agents: the host installs by prompt (plugin, its own skill installer, or copying `skills/<name>/` folders). There is no install script.
 - `VALIDATION.md`, `SHA256SUMS` and the version line at the top of `README.md` are release records.
 
@@ -63,7 +63,7 @@ These come from the maintainer's decisions during live tests; follow them unless
 - Tag `vX.Y.Z` (annotated) on the checksum commit and build the ZIP from the tag:
 
   ```sh
-  git archive --format=zip --prefix=spot-train-agent/ -o spot-train-agent-vX.Y.Z.zip vX.Y.Z
+  git archive --format=zip --prefix=spot-trainer/ -o spot-trainer-vX.Y.Z.zip vX.Y.Z
   ```
 
 - Each release's scope goes in the release notes on the tag (the GitHub release text), written for users: what changed and why, without links to private records.

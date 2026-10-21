@@ -26,4 +26,4 @@ Research baseline: 2026-10-01. Recheck volatile prices, SKUs, quotas, stock, API
 
 Passing levels 1–3 does not establish levels 4–6. These skills must refuse to claim real cloud recovery tested without actual job IDs, logs and checkpoint continuity evidence.
 
-The skills' own test history is in VALIDATION.md of the skills repository (https://github.com/FrostyAlien/spot-train-agent); recheck version-specific behaviour for the SkyPilot version chosen at the start.
+The skills' own test history is in VALIDATION.md of the skills repository (https://github.com/FrostyAlien/spot-trainer); recheck version-specific behaviour for the SkyPilot version chosen at the start.

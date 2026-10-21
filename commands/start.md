@@ -1,5 +1,5 @@
 ---
-description: Plan, start or continue a spot GPU training run for this repository with Spot Train Agent
+description: Plan, start or continue a spot GPU training run for this repository with SpotTrainer
 argument-hint: "[what you want, e.g. train with a $50 budget]"
 ---
 
