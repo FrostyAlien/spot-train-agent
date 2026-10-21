@@ -82,11 +82,13 @@ approved by the user), it never silently continues with different hyperparameter
 - `qualify`: the real image, launcher, world size, precision and per-device batch, on the qualification subset.
   Its argv is the real argv plus the framework's own settings for the step count and the save and evaluation
   intervals, never a debug mode that turns saving off. Default shape: save (and evaluate, when the project
-  evaluates) every `S` steps and train `3S + 2`, where `S` is 6 plus the loader's look-ahead (background
-  workers x prefetched batches each; 0 without background loading, which gives 20 steps). Batches prepared
-  during startup otherwise serve most measured steps, which then show the GPU's speed and hide a data-loading
-  bottleneck. Size the subset so the `3S + 2` steps cross one epoch boundary: epoch-start work then shows in
-  the measured gaps.
+  evaluates) every `S` steps and train `3S + 2`, with `S` = 6 + `L`. `L` is the loader's look-ahead on one
+  rank: its background workers x the batches each prefetches (for an auto-tuned buffer, its upper bound; 0
+  without background loading, which gives 20 steps). The loader fills `L` batches during startup and again
+  during every save and evaluation, so the first `L` steps after each run on ready batches and show only the
+  GPU's speed; the last 6 steps before each save run at the data's real pace. Count `L` in batches and `S` in
+  steps: with gradient accumulation the run is only longer than needed. Size the subset so the `3S + 2` steps
+  cross one epoch boundary: epoch-start work then shows in the measured gaps.
   The task runs the entrypoint twice and checks the journal (`checkpoint_marker.py journal-check`):
   - start 1 (fresh) stops after its second commit (steps `S` and `2S`; the second save shows the steady
     state): journal `finish`, exit 0;
@@ -98,10 +100,10 @@ approved by the user), it never silently continues with different hyperparameter
   (some frameworks change how they gather after the first evaluation).
   Rank 0 journals `save_seconds` (how long that save blocked training) and `checkpoint_gb` with every
   `commit`, and with `finish`: `peak_memory_fraction` (highest rank, of the device total), `startup_seconds`
-  (entrypoint start to the first step), `step_seconds` (mean wall time per train step over start 1's steps
-  after the look-ahead is used up, saves and evaluations excluded; not one step),
+  (entrypoint start to the first step), `step_seconds` (mean wall time per train step over start 1's last 6 steps
+  before each save, steps `L + 1` to `S` and `S + L + 1` to `2S`; not one step),
   `eval_seconds` (one evaluation of the subset's eval set, when the project evaluates) and
-  `loader_wait_fraction` (share of step time spent waiting for data over the same steps; for `MOUNT` data
+  `loader_wait_fraction` (share of step time spent waiting for data, over the same 12 steps; for `MOUNT` data
   also `read_mb_s`).
   Above 0.9 memory the task fails: lower the per-device batch in argv. The numbers size the save interval,
   the disk and the startup allowance (launch runbook).

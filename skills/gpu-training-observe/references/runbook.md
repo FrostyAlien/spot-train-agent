@@ -28,8 +28,10 @@ worker sends every evaluation to the user as it comes; the agent judges only at 
 At each return: judge the training (below) and send the user two lines, the step with the metrics against
 the expectation and the rate against the qualification, then the spend upper bound (at the on-demand price:
 the worker's latest `limits` event, or the guard's last tick when it runs) and the next planned evaluation;
-then re-arm. A rate more than 25 % off the qualification's: give the user the new expected end and its cost
-bound at the first planned evaluation, while the step count can still change. A timeout is itself an event: the step stopped advancing or slowed. Read the status and the log
+then re-arm. At the first planned evaluation, compare the measured step time with the
+qualification's `step_seconds` (the subset can read faster than the full data: page cache, smaller files). When
+they differ by more than 25 %, send the user the new expected end (steps to go x the measured step time) and its
+cost bound: the step count can still change then. A timeout is itself an event: the step stopped advancing or slowed. Read the status and the log
 tail before deciding anything. A `STALL` line means the stall watchdog stopped a hung run (triage below).
 Status and the worker's spend bound at any time (*(offline only)* for the `limits` events):
 ```bash

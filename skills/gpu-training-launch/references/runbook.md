@@ -64,13 +64,15 @@ the optional guard; keep `SCHED` for the run). A `sky` command silent
 for two minutes: read the API server log (controller runbook) before anything else.
 
 ## 1. GPU qualification (once per new stack; inside the approved qualification cap)
-Before it, in the image on CPU: the exact `ARGV` parsed by the framework's own parser (image runbook step 3),
-and, after any change to the staged full dataset (dropped or fixed samples), its index or split metadata loaded
-with the project's own loader, with the split sizes of its manifest: the qualification reads only the subset.
+Before it, in the image on CPU: the exact `ARGV` parsed by the framework's own parser (image runbook step 3).
+When the staged full data differs from its source (samples dropped or fixed, at staging or later), also load its
+index or split metadata there with the project's own loader: the split sizes it reports must equal the manifest's
+counts. The qualification reads only the subset, so it cannot catch a mismatch in the full data.
 Optionally, when the user has a GPU of their own and wants to, the same two starts run there first
 (image runbook: [local test](../../gpu-training-image/references/runbook.md#5-local-test-on-the-users-gpu-optional-offline-only)).
 Build the qualification argv `QARGV`: `ARGV` plus the framework's step settings for `3S + 2` steps, evaluating
-and saving every `S`, with `S` = 6 + the loader's look-ahead in `ARGV` (lifecycle entrypoint contract: `qualify`). With a qualification subset (`dataset.qualify_uri`,
+and saving every `S`, with `S` = 6 + the loader's look-ahead per rank in `ARGV` (workers x batches each prefetches;
+for example 4 x 2 = 8, so `S` = 14 and 44 steps; definition: lifecycle entrypoint contract, `qualify`). With a qualification subset (`dataset.qualify_uri`,
 data skill: staging) the task reads the subset instead of the full dataset, in the same mount mode and with
 the same disk. `ES` is the full eval set's size over the subset's. Leave `--eval-scale` out when the project
 does not evaluate.
@@ -91,7 +93,8 @@ second save, then a resume to the end and `finalize`), then
 `wait` as a background command: it returns when the launch ends. The task usually takes about 2-3 minutes once the
 allocation has started (after provisioning, image pull and mounts) and fails fast at the first broken step. `--timeout-minutes` bounds each start: the time to
 the first step (model download, compilation; 10 minutes until `startup_seconds` is measured) plus 10 minutes
-for the steps, evaluations and saves. Each start runs under the stall watchdog with its default limits, not the
+for the steps, evaluations and saves; raise it when `2S` steps at the expected step time plus two saves and two
+evaluations come near 10 minutes. Each start runs under the stall watchdog with its default limits, not the
 contract's, so a hang ends within minutes with a `STALL` line and the ranks' stacks. A hang before the first tick
 ends two minutes before the per-start timeout (up to a 32-minute timeout), without stacks; a slow but healthy
 startup there needs a larger `--timeout-minutes`. The limits, and a `STALL` during healthy silent work:
@@ -100,8 +103,9 @@ Check: `stage qualify-$T exit 0` and the journal-check line `{"events": ..., "ok
 renderer stamps the task with its render time, so launch right after rendering); then `sky down -y q-$T`.
 On a failure, first run `sky autostop -y q-$T -i 30 --down`: a launch that failed while provisioning or
 mounting never set the task's own autodown, and `sky status` then shows no AUTOSTOP for a VM that bills until
-someone tears it down. When that command fails too (a cluster left half set up), retry the launch on it now or
-`sky down -y q-$T`; never leave it without autostop. Keep the cluster for the fix loop below, and `$W/secrets.env` with it; `sky down` it
+someone tears it down. If `sky autostop` fails too (the cluster is half set up), run `sky down -y q-$T`, or relaunch on it now
+(`sky launch -y -c q-$T $W/tasks/qualify-$T.yaml --secret-file $W/secrets.env`). Never leave a cluster without
+autostop. Keep the cluster for the fix loop below, and `$W/secrets.env` with it; `sky down` it
 once a qualification passes or the user stops. `peak_memory_fraction` above 0.9
 fails: lower the per-device batch in `ARGV` (raise gradient accumulation to keep the effective batch) and
 repeat; no image rebuild. A spot cluster that the provider stopped during the task (`sky status` shows it
@@ -123,12 +127,13 @@ After a pass, set these and report them to the user in one block:
   1.25 x `checkpoint_gb` + 10 GB fit beside the image and data. Both rules: `gpu-training-recover` →
   `references/contract.md#checkpoint-size-path-and-save-interval`.
 - **Data:** `loader_wait_fraction` (or `read_mb_s` for `MOUNT` data): above 0.3 the run is limited by data
-  loading, not the GPU. Report it; before the paid run, add loader workers (or another mount mode) and
-  qualify again, or accept the measured rate.
+  loading, not the GPU. Report it and ask: the fixes in the data skill
+  (`gpu-training-data` → `references/staging.md#measure-io-in-the-qualification-task`) change the configuration
+  (a deviation in the automatic level) and the look-ahead, so qualify again with the new `S`; or the user accepts
+  the measured rate.
 - **Time:** the expected training time is `step_seconds` x the target steps, plus the evaluations
   (`eval_seconds` scaled by the full eval set's size over the subset's); the observe runbook's planned waits
-  use it. The subset can still read faster than the full data (page cache, smaller files): the first planned
-  evaluation checks the rate.
+  use it. The first planned evaluation checks it against the main run's rate (observe runbook).
 - **Hang limits** *(offline only)*: copy the printed `recommended.watchdog` into the contract's `watchdog`; its
   `notes` and tuning: `gpu-training-observe` → `references/guard.md#stall-watchdog`. Set the collective timeout
   in `ARGV` too (entrypoint contract).
