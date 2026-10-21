@@ -2,23 +2,23 @@
 
 What has been tested, and how. Runbook steps marked *(offline only)* have not run in a live test. After a live run, remove the marker from the steps that ran.
 
-## Offline tests (v0.9.5, macOS / Python 3.13)
+## Offline tests (v0.10.0, macOS / Python 3.13)
 
-359 tests pass:
+399 tests pass:
 
 | Suite | Tests |
 |---|---:|
 | Root release checks (skill layout, links and anchors, runbook commands) | 10 |
 | `tests/controller/` network check, detached stages | 4 |
 | `tests/image/` GPU preflight | 19 |
-| `tests/launch/` task renderer | 60 |
-| `tests/lifecycle/` experiment-contract validator | 60 |
-| `tests/observe/` campaign guard, stall watchdog, PyTorch rank mode | 116 |
-| `tests/recover/` checkpoint marker and verifier | 78 |
+| `tests/launch/` task renderer (limits, fallback, scheduling timeout, price cap) | 65 |
+| `tests/lifecycle/` experiment-contract validator (server modes, guard, notify, price cap) | 66 |
+| `tests/observe/` optional campaign guard, stall watchdog and alive file, notifications, PyTorch rank mode | 128 |
+| `tests/recover/` checkpoint marker and verifier, the worker's limits | 95 |
 | `tests/select/` cost calculator | 12 |
 
-- `test_runbook_commands.py` with `SKY_BIN` checks every `sky` command and flag in the skills against `--help` of an installed SkyPilot; it passes on SkyPilot 0.13.0 and `skypilot-nightly 1.0.0.dev20261001`.
-- `tests/linux/run.sh` runs the stall watchdog's Linux scenarios (t1-t8: ticks, quiet limits, saves on a throttled disk, `torch_rank.py` under `torchrun`, Lightning) in a CPU container.
+- `test_runbook_commands.py` with `SKY_BIN` checks every `sky` command and flag in the skills against `--help` of an installed SkyPilot; for v0.10.0 it passes on SkyPilot 0.14.0 (earlier releases: 0.13.0 and `skypilot-nightly 1.0.0.dev20261001`). The renderer's round trip with 0.14.0 parses the `ordered` spot-then-on-demand fallback and refuses `job.wait_for_scheduling_timeout`, which the start check then leaves out.
+- `tests/linux/run.sh` runs the stall watchdog's Linux scenarios (t1-t8: ticks, quiet limits, saves on a throttled disk, `torch_rank.py` under `torchrun`, Lightning) in a CPU container. Not run for v0.10.0 yet (no Docker on the build machine; the watchdog gained the alive file and the stall notice): run before the merge.
 
 Reproduce:
 
@@ -46,6 +46,7 @@ All on one provider (Nebius) with L40S GPUs and spot capacity. Each found gaps t
 See the roadmap in the README.
 
 
+- v0.10.0's new paths: the worker's limits and notifications, a run without a control host (an existing or provider-managed server), the ordered on-demand fallback, the spot price cap (plan: live tests L0, L1, L1b, L2)
 - Guard cancel, blind and on-demand fallback paths; the worker deadline stop
 - 8 GPUs on one node; multiple nodes (the goal, not supported yet); any provider other than Nebius; the Minimal tier
 - Control-plane state backup and restore, duplicate-controller fencing

@@ -4,7 +4,7 @@ Let your coding agent run your model training on cheap spot (preemptible) GPU in
 
 I built this to spend less on renting GPUs for my own research: spot instances are much cheaper, but they get preempted, and a run needs watching. These skills let my agent handle both, so I can train on spot capacity and check in only when there is something to decide. If you rent GPUs for research training and want the same, give it a try.
 
-Version 0.9.5 • [MIT](LICENSE) • Works with Claude Code, Codex and other hosts that read `SKILL.md` skills
+Version 0.10.0 • [MIT](LICENSE) • Works with Claude Code, Codex and other hosts that read `SKILL.md` skills
 
 ## Install
 

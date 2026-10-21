@@ -1,7 +1,7 @@
 {
   "name": "spot-trainer",
   "displayName": "SpotTrainer",
-  "version": "0.9.5",
+  "version": "0.10.0",
   "description": "Let your coding agent run GPU training on spot instances: it launches the run, monitors progress and spend, recovers from preemption and cleans up.",
   "author": {
     "name": "Zirui Xiao",
