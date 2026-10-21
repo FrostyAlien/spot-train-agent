@@ -71,9 +71,9 @@ waiting for capacity after a preemption, a timed fallback and notices while no V
 
 ## 12. Why did the run stop
 Task: "The managed job shows SUCCEEDED but training did not reach the last step. What happened?"
-Expected: a limit stopped it: read FINAL.json's outcome (`budget_stopped`, `no_progress_stopped`,
-`attempts_stopped`, `deadline_stopped`) or, with nothing committed, the journal's `limit` event; every limit stop
-exits 0, the only code that ends a managed job without a restart.
+Expected: a limit stopped it: FINAL.json `deadline_stopped` for the deadline; otherwise no FINAL.json and the
+journal's `limit` event (budget, no_progress, attempts); every limit stop exits 0, the only code that ends a managed
+job without a restart. To go on after a budget stop: approve a raised limit and relaunch under the same run id.
 
 ## 13. A Nebius spot price cap
 Task: "On Nebius, can the run pause instead of paying above 1.50 per GPU-hour?"

@@ -46,10 +46,12 @@ Two thin helpers make a run provable after recovery (both write-once files on th
                [--max-attempts-without-progress N] [--max-attempts N] [--deadline ISO] [--shutdown-reserve-minutes M]
                                                                    the run's limits at a worker start, from the journal
                                                                    and the alive files: JSON with the spend upper bound,
-                                                                   allocations, stop_at_utc and the limit reached; exit 5
-                                                                   when a limit is reached now (stop without training)
-  finalize     RUN_DIR IDENTITY --outcome OUTCOME [--target-step N] [--artifact REL ...]   OUTCOME: completed,
-               deadline_stopped, stopped, budget_stopped, no_progress_stopped or attempts_stopped
+                                                                   allocations, stop_at_utc (and stop_by: budget or
+                                                                   deadline) and the limit reached; exit 5 when a limit is
+                                                                   reached now (stop without training). Only the deadline
+                                                                   is final: a budget or attempt stop writes no FINAL.json,
+                                                                   so a relaunch with a raised limit resumes the run
+  finalize     RUN_DIR IDENTITY --outcome completed|deadline_stopped|stopped [--target-step N] [--artifact REL ...]
   verify-final RUN_DIR IDENTITY                                     FINAL.json still matches the bucket; exit 3 if not;
                                                                    lists lineage_warnings (lost progress)
   prune-list   RUN_DIR [--keep 3]                                   checkpoint directories safe to delete from outside
@@ -196,7 +198,7 @@ EVENT = re.compile(r'[a-z][a-z0-9_-]{0,39}')
 MEASURES = ('read_mb_s', 'save_seconds', 'checkpoint_gb', 'startup_seconds', 'step_seconds', 'eval_seconds',
             'loader_wait_fraction')
 LOW_UTILISATION = 0.3          # peak GPU memory fraction below which the report says the GPUs are under-used
-OUTCOMES = ('completed', 'deadline_stopped', 'stopped', 'budget_stopped', 'no_progress_stopped', 'attempts_stopped')
+OUTCOMES = ('completed', 'deadline_stopped', 'stopped')   # final; a budget or attempt limit is not (the run can go on)
 LIMIT_EXIT = 5                 # `limits`: a limit is reached now; the worker stops without training
 
 
@@ -436,7 +438,8 @@ def limits(run_dir, *, submitted_at: float, ceiling_hourly: float, budget: float
       the alive files or the journal. An allocation lost before its watchdog started and before any journal
       entry is not seen. Without readable alive files the bound falls back to the time since submission;
     - otherwise the time since submission (waiting is billed too).
-    Plus reserved (controller, storage) and spent_before (earlier jobs of the run). stop_at_utc is when the budget
+    Plus reserved (controller, storage, spend outside the run) and spent_before (an extra amount, normally 0: with
+    submitted_at the run's first submission, earlier jobs of the run are already in the bound). stop_at_utc is when the budget
     runway, less the shutdown reserve, runs out (or the deadline, if earlier): the worker stops gracefully there.
     limit names what is reached now: deadline, attempts, no_progress or budget (None: keep training)."""
     now = time.time() if now is None else now
@@ -444,7 +447,8 @@ def limits(run_dir, *, submitted_at: float, ceiling_hourly: float, budget: float
         raise ValueError('ceiling_hourly and budget must be positive')
     # A start that only put its new VM under the spot price cap and stopped it is not an allocation of its own.
     runs = [r for r in _starts(read_journal(run_dir))
-            if not any(e.get('event') == 'price_cap' and e.get('state') == 'switched' for e in r)]
+            if not (any(e.get('event') == 'price_cap' and e.get('state') == 'switched' for e in r)
+                    and not any(e.get('event') == 'selection' for e in r))]
     allocations = len(runs)
     without_progress = 0
     for run in reversed(runs[:-1]):                 # earlier starts in a row that ended without a commit
@@ -461,6 +465,10 @@ def limits(run_dir, *, submitted_at: float, ceiling_hourly: float, budget: float
             # uploads). An unreadable file counts up to the next allocation's start (or now).
             times = sorted(_epoch(e['time']) for e in read_journal(run_dir) if 'time' in e)
             spans = 0.0
+            for run in runs:                            # a start older than every alive file: its journal span
+                when = [_epoch(e['time']) for e in run if 'time' in e]
+                if when and max(when) < alive[0]['start']:
+                    spans += max(when) - min(when) + 2 * 300.0
             for i, a in enumerate(alive):
                 nxt = alive[i + 1]['start'] if i + 1 < len(alive) else now
                 last = a['last'] if a['last'] is not None else nxt
@@ -474,9 +482,9 @@ def limits(run_dir, *, submitted_at: float, ceiling_hourly: float, budget: float
             notes.append('no alive files')
     spend = hours * ceiling_hourly + reserved + spent_before
     runway_hours = (budget - spend) / ceiling_hourly - shutdown_reserve_minutes / 60
-    stop_at = now + max(0.0, runway_hours) * 3600
-    if deadline:
-        stop_at = min(stop_at, _epoch(deadline))
+    stop_at, stop_by = now + max(0.0, runway_hours) * 3600, 'budget'
+    if deadline and _epoch(deadline) <= stop_at:
+        stop_at, stop_by = _epoch(deadline), 'deadline'
     limit = None
     if deadline and now >= _epoch(deadline):
         limit = 'deadline'
@@ -489,7 +497,7 @@ def limits(run_dir, *, submitted_at: float, ceiling_hourly: float, budget: float
     result = {'limit': limit, 'allocations': allocations, 'allocations_without_progress': without_progress,
               'spend_upper_usd': round(spend, 2), 'spend_basis': basis, 'budget_usd': budget,
               'runway_hours': round(max(0.0, runway_hours), 3),
-              'stop_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(stop_at))}
+              'stop_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(stop_at)), 'stop_by': stop_by}
     if notes:
         result['notes'] = notes
     return result
@@ -628,7 +636,8 @@ def main(argv=None):
     lm.add_argument('--ceiling-hourly', type=float, help='the node on-demand price per hour')
     lm.add_argument('--budget', type=float, help="the run's total budget")
     lm.add_argument('--reserved', type=float, default=0.0, help='controller and storage allowance')
-    lm.add_argument('--spent-before', type=float, default=0.0, help='upper bound of earlier jobs of the run')
+    lm.add_argument('--spent-before', type=float, default=0.0,
+                    help='an extra amount to count (spend outside the run belongs in --reserved)')
     lm.add_argument('--free-without-vm', action='store_true', help='the provider bills only while a VM exists')
     lm.add_argument('--startup-allowance-minutes', type=float, default=10.0)
     lm.add_argument('--max-attempts-without-progress', type=int, default=10)

@@ -545,8 +545,6 @@ class LimitsTests(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue())['limit'], 'budget')
 
     def test_free_without_vm_counts_allocations_not_waiting(self):
-        self.start('a1', commit=True)
-        self.start('a2')
         self.alive('a1', self.NOW - 2 * 3600, self.NOW - 1.5 * 3600)   # 30 min, then preempted
         self.alive('a2', self.NOW - 600, self.NOW - 60)                 # this allocation
         r = self.limits(free_without_vm=True, submitted_at=self.NOW - 20 * 3600)
@@ -557,7 +555,6 @@ class LimitsTests(unittest.TestCase):
         self.assertIsNone(r['limit'])                                  # 20 h of waiting is free
 
     def test_an_unreadable_alive_file_counts_up_to_the_next_allocation(self):
-        self.start('a1')
         d = self.run / 'alive'
         d.mkdir()
         first = self.NOW - 3 * 3600
@@ -637,9 +634,33 @@ class LimitsTests(unittest.TestCase):
         self.assertEqual((r['allocations'], r['allocations_without_progress']), (2, 0))
         self.assertIsNone(r['limit'])
 
-    def test_new_outcomes_are_accepted_by_finalize(self):
-        for outcome in ('budget_stopped', 'no_progress_stopped', 'attempts_stopped'):
-            self.assertIn(outcome, cm.OUTCOMES)
+    def test_only_the_deadline_and_completion_are_final(self):
+        # a budget or attempt stop writes no FINAL.json, so a relaunch with a raised limit resumes the run
+        self.assertEqual(cm.OUTCOMES, ('completed', 'deadline_stopped', 'stopped'))
+        self.start('a1')
+        soon = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.NOW + 600))
+        self.assertEqual(self.limits(deadline=soon)['stop_by'], 'deadline')
+        late = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.NOW + 30 * 3600))
+        self.assertEqual(self.limits(deadline=late)['stop_by'], 'budget')
+
+    def test_a_start_older_than_every_alive_file_is_counted(self):
+        cm.journal(self.run, 'a1', 'preflight')
+        cm.journal(self.run, 'a1', 'commit', {'step': '6'})
+        rec = [json.loads(f.read_text()) for f in sorted((self.run / 'journal' / 'a1').glob('*.json'))]
+        t = cm._epoch(rec[0]['time'])
+        self.alive('b', t + 3600, t + 3660)                              # the next allocation, an hour later
+        r = cm.limits(self.run, submitted_at=t - 10, ceiling_hourly=1.0, budget=100.0, now=t + 3700,
+                      free_without_vm=True, startup_allowance_minutes=0)
+        self.assertGreaterEqual(r['spend_upper_usd'], round((60 + 600 + 600) / 3600, 2))   # a1's span counted too
+
+    def test_a_capped_start_that_trained_still_counts(self):
+        cm.journal(self.run, 'a1', 'preflight')
+        cm.journal(self.run, 'a1', 'price_cap', {'state': 'switched'})
+        cm.journal(self.run, 'a1', 'selection', {'action': 'fresh'})   # capped in place and trained
+        cm.journal(self.run, 'a1', 'commit', {'step': '6'})
+        self.start('a2')
+        r = self.limits()
+        self.assertEqual((r['allocations'], r['allocations_without_progress']), (2, 0))
 
 
 if __name__ == '__main__':

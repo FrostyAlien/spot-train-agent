@@ -62,7 +62,8 @@ sky jobs logs --controller --no-follow $JOB | tail -50
 | Signal | Class | Next action |
 |---|---|---|
 | `SUCCEEDED`, FINAL.json `completed` | done | finish runbook |
-| `SUCCEEDED`, FINAL.json `budget_stopped`, `no_progress_stopped`, `attempts_stopped` or `deadline_stopped`, or no FINAL.json and a journal `limit` event | a limit in the worker | report which limit, the step reached and the spend bound (`journal-show`); finish runbook. More training needs a new approval and a new run revision that resumes from this run's final checkpoint |
+| `SUCCEEDED`, FINAL.json `deadline_stopped` | the deadline | report the step reached; finish runbook |
+| `SUCCEEDED`, no FINAL.json and a journal `limit` event (budget, no_progress, attempts) | a limit in the worker | report which limit, the step reached and the spend bound (`journal-show`). To go on: the user approves a raised limit in the contract, then relaunch under the same run id (launch runbook §4); it resumes from the newest checkpoint. Otherwise the finish runbook (its path without FINAL.json) |
 | `CANCELLED`, `failure_reason` names `wait_for_scheduling_timeout` | no capacity before the first start | report the wait; relaunch later, or with another approved GPU or region, only with new approval |
 | `CANCELLED`, the guard ledger's `log` has a cancel (with the guard) | guard limit | report the reason (budget during a wait, capacity wait, wedged VM); a new launch needs new approval |
 | `CANCELLED`, otherwise | a person or another tool | ask before anything else |

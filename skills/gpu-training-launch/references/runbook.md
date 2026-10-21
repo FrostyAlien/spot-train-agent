@@ -202,7 +202,8 @@ or timed out without an id, do not resubmit: look for the job first (`sky jobs q
 recent `submitted_at`). Every job of the run renders with the same `$W/campaign-start`, so the worker's spend bound
 covers earlier jobs and the gaps between them (with `budget.free_without_vm`, the run's alive files count every
 allocation instead). Spend outside the run (qualification, data, control host, earlier run revisions) is counted once,
-in `budget.controller_allowance`. The worker now enforces the run's limits and notifies; continue with the observe runbook. The rest of this section is only
+in `budget.controller_allowance`. Without `budget.free_without_vm` the time between jobs counts too (a relaunch a day
+later starts with a day spent): relaunch soon, or raise the budget with approval. The worker now enforces the run's limits and notifies; continue with the observe runbook. The rest of this section is only
 for the optional guard (`monitoring.guard: external`); before the submission above, its dry run must then say ok:
 ```bash
 $P $G --init-config --contract /abs/experiment.json --job-id 0 --workdir $W --notify-cmd '<json argv>' --dry-run | grep -q '"runway_hours"' || { echo "guard config refused: fix it before submitting"; exit 1; }

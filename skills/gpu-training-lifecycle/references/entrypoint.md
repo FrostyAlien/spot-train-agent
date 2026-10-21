@@ -18,7 +18,7 @@ The rendered task (`gpu-training-launch` → `scripts/render_job.py`) sets:
 | `RUN_MODE` | `train`, `qualify` (the real GPUs and world size on the qualification subset, run twice: fresh to its second save, then resume to the end) or `rehearsal` (the optional CPU fallback) |
 | `IMAGE_DIGEST`, `GPU_COUNT` | the image digest and the GPU count from the contract (an image cannot know its own digest): identity fields of every manifest and the preflight journal |
 | `CAMPAIGN_DEADLINE_UTC` | optional absolute deadline (train only; absent by default: the budget is the hard stop) |
-| `CAMPAIGN_SUBMITTED_AT`, `BUDGET_LIMIT_USD`, `BUDGET_RESERVED_USD`, `BUDGET_SPENT_BEFORE_USD`, `CEILING_HOURLY_USD`, `FREE_WITHOUT_VM`, `STARTUP_ALLOWANCE_MINUTES`, `MAX_ATTEMPTS_WITHOUT_PROGRESS`, `MAX_ATTEMPTS` | the run's limits (train only), passed to `checkpoint_marker.py limits` at every start (below); no secrets |
+| `CAMPAIGN_SUBMITTED_AT` (the run's first submission), `BUDGET_LIMIT_USD`, `BUDGET_RESERVED_USD`, `CEILING_HOURLY_USD`, `FREE_WITHOUT_VM`, `STARTUP_ALLOWANCE_MINUTES`, `MAX_ATTEMPTS_WITHOUT_PROGRESS`, `MAX_ATTEMPTS` | the run's limits (train only), read by `checkpoint_marker.py limits --from-env` at every start (below); no secrets |
 | `PRICE_CAP_ID` | optional (`budget.spot_price_cap.cap_id`): the provider's spot price cap for `hook_price_cap` (provider hooks: optional spot price cap) |
 | `NOTIFY_URL`, `NOTIFY_FORMAT` | the notification channel: `NOTIFY_URL` is a required secret (in `SECRET_NAMES`) whenever the contract names a channel, so the wrapper blocks when it is missing; `notify.py` reads both |
 | `SECRET_NAMES` | secrets the launch supplies as environment variables (the `SKYPILOT_DOCKER_*` ones are consumed by SkyPilot for the image pull) |
@@ -105,9 +105,9 @@ approved by the user), it never silently continues with different hyperparameter
   and has its own config hash.
 
 ## Exit codes (what triage reads)
-`0` completed, or stopped by a limit (deadline, budget, allocations without progress, allocations; FINAL.json
-written, or the journal's `limit` event when nothing was committed yet): exit 0 is the only code that ends a managed
-job without a restart - `3` blocked: restore, identity, storage,
+`0` completed, or stopped by a limit (FINAL.json for completion and the deadline; a journal `limit` event for the
+budget, allocations without progress and allocations): exit 0 is the only code that ends a managed job without a
+restart - `3` blocked: restore, identity, storage,
 data manifest or credentials; never start fresh - `4` job-start preflight failed (image, driver, host) - `93`
 the stall watchdog stopped a hung run (never in `recover_on_exit_codes`: a hang is not repaired by a
 restart) - `124` the runtime timeout - anything else: an application failure.
@@ -127,7 +127,7 @@ wrapper(argv):                                    # one process per node, the ta
     if RUN_MODE != rehearsal:
         report = gpu_preflight.probe(expected_gpus, expected_platform, min_free_gb=disk budget)   # as `gpu_preflight.py probe` does: print the JSON; exit 4 when not ok
         journal(run, attempt, "preflight", report + identity)   # image digest, dataset version, world size
-    if RUN_MODE == train and FINAL.json exists under run:   # finalized earlier (a limit or completion): done
+    if RUN_MODE == train and FINAL.json exists under run:   # completed or stopped at the deadline: final
         print("FINAL.json exists (outcome ...): nothing to train"); exit 0
     if RUN_MODE == train:                         # the run's limits; no outside guard is needed
         limits = `checkpoint_marker.py limits $CHECKPOINT_DIR --from-env`   # exit 0: keep going, 5: a limit now
@@ -135,10 +135,10 @@ wrapper(argv):                                    # one process per node, the ta
         journal(run, attempt, "limits", **limits)  # the finish and the status checks read the spend bound here
         if limits.limit:                          # reached now: stop without training, exit 0 (never a restart)
             journal(run, attempt, "limit", reached=limits.limit)
-            try: checkpoint_marker.finalize(run, identity, outcome=OUTCOME[limits.limit])   # budget_stopped, ...
-            except Blocked: pass                  # nothing committed yet: the journal says why
+            if limits.limit == "deadline": try finalize(run, identity, outcome="deadline_stopped") except Blocked: pass
             notify(f"stopped: {limits.limit} (spend <= {limits.spend_upper_usd} USD, an upper bound)", "stopped"); exit 0
-        env.CAMPAIGN_STOP_UTC = limits.stop_at_utc   # the budget runway's end or the deadline, whichever is first
+            # budget, no_progress, attempts write no FINAL.json: a relaunch with a raised limit resumes this run
+        env.CAMPAIGN_STOP_UTC, env.CAMPAIGN_STOP_BY = limits.stop_at_utc, limits.stop_by   # budget or deadline
     if RUN_MODE == train and PRICE_CAP_ID is set:  # optional (offline only): each new VM caps its own spot price
         cap = hook_price_cap(PRICE_CAP_ID)        # provider hooks; needs the provider CLI and credentials in the image
         if cap failed: journal(run, attempt, "price_cap", state="failed"); notify("spot price cap failed: running uncapped", "price_cap")
@@ -190,9 +190,9 @@ main():                                           # every rank, started by the l
             rank0: journal(run, attempt, "finish", peak_memory_fraction=..., startup_seconds=..., ...); exit 0
         if past_deadline:
             progress_watch.tick("final", step=step, rank=rank)
-            rank0: checkpoint_marker.finalize(run, identity, outcome="deadline_stopped" if the deadline came first
-                                                else "budget_stopped", artifacts=...)
-            rank0: notify("stopped at the " + ("deadline" or "budget") + f", step {step}", "stopped"); exit 0
+            if CAMPAIGN_STOP_BY == "deadline": rank0: checkpoint_marker.finalize(run, identity, outcome="deadline_stopped", artifacts=...)
+            else: rank0: journal(run, attempt, "limit", reached="budget", step=step)   # not final: the run can go on
+            rank0: notify(f"stopped at the {CAMPAIGN_STOP_BY}, step {step}", "stopped"); exit 0
 
     progress_watch.tick("final", step=last, rank=rank)           # end-of-training work: its own quiet limit
     rank0: checkpoint_marker.finalize(run, identity, outcome="completed", target_step=last, artifacts=[final/...])
@@ -200,8 +200,8 @@ main():                                           # every rank, started by the l
 ```
 `notify(text, event)` runs `timeout 20 python3 /opt/gpu-skills/notify.py --event <event> <text>` (best effort; it
 never fails or holds up the run).
-`OUTCOME` maps the limit to the FINAL outcome: budget -> `budget_stopped`, no_progress -> `no_progress_stopped`,
-attempts -> `attempts_stopped`, deadline -> `deadline_stopped`.
+Only completion and the deadline write FINAL.json. A budget, no-progress or attempt stop leaves a journal `limit`
+event: after the user approves a raised limit, a relaunch under the same run id resumes from the newest checkpoint.
 
 Notes:
 - Object stores have no empty directories: every write under `CHECKPOINT_DIR` creates its parents first.
