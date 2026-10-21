@@ -140,7 +140,7 @@ Works now:
 - [x] Build and test the training image with you
 - [x] Recover from spot preemption: replacement on the same provider, resume from the newest verified checkpoint
 - [x] Budget, deadline and attempt limits enforced by the run itself, and notifications from the worker
-- [x] Runs on your own control host, or on an existing, provider-managed or local SkyPilot server
+- [x] Runs on your own control host, or on an existing, provider-managed or local SkyPilot server (live-tested on Nebius's managed server)
 - [x] Stall watchdog that stops a hung run instead of letting it bill
 - [x] Agent check-ins at planned evaluations: progress, spend and training quality
 - [x] TB-scale datasets in the provider's storage, or read from Hugging Face at a pinned revision
@@ -152,7 +152,6 @@ Next:
 - [ ] Multi-node training
 - [ ] Live test of reusing your own image and of the local test on your own GPU
 - [ ] Live test with 8 GPUs on one node
-- [ ] Live test of a run without a control host (Nebius's managed SkyPilot server)
 - [ ] Spot price cap through a provider pricing policy (Nebius), live test
 - [ ] Live test of the guard's on-demand fallback and cancel paths
 - [ ] Control-plane backup and restore

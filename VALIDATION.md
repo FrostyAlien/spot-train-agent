@@ -18,7 +18,7 @@ What has been tested, and how. Runbook steps marked *(offline only)* have not ru
 | `tests/select/` cost calculator | 12 |
 
 - `test_runbook_commands.py` with `SKY_BIN` checks every `sky` command and flag in the skills against `--help` of an installed SkyPilot; for v0.10.0 it passes on SkyPilot 0.14.0 (earlier releases: 0.13.0 and `skypilot-nightly 1.0.0.dev20261001`). The renderer's round trip with 0.14.0 parses the `ordered` spot-then-on-demand fallback and refuses `job.wait_for_scheduling_timeout`, which the start check then leaves out.
-- `tests/linux/run.sh` runs the stall watchdog's Linux scenarios (t1-t8: ticks, quiet limits, saves on a throttled disk, `torch_rank.py` under `torchrun`, Lightning) in a CPU container. Not run for v0.10.0 yet (no Docker on the build machine; the watchdog gained the alive file and the stall notice): run before the merge.
+- `tests/linux/run.sh` runs the stall watchdog's Linux scenarios (t1-t8: ticks, quiet limits, saves on a throttled disk, `torch_rank.py` under `torchrun`, Lightning) in a CPU container. For v0.10.0 all nine (t1-t8, t7b) pass on a Nebius 4-vCPU CPU VM (Docker 29.1.3, Python 3.12, torch 2.14.1+cpu, Lightning 2.6.6).
 
 Reproduce:
 
@@ -40,13 +40,14 @@ All on one provider (Nebius) with L40S GPUs and spot capacity. Each found gaps t
 | 2026-10-03 | 0.7.0 | 1-2 GPUs, a new project, automatic level | A user-style run from intake to finish |
 | 2026-10-04 | 0.8.0, 0.8.1 | 1-2 GPUs, SkyPilot 0.13.0 | GPU probe, qualification and fix loop, subset copy, submit, guards under systemd, evented waits, the stall watchdog on an injected one-rank stall and on a real 2-GPU Hugging Face evaluation hang, exit-code paths through the wrapper, finish verification, inventory and pruning |
 | 2026-10-05 | 0.9.0 | CPU VM and 2 GPUs, SkyPilot 0.13.0 | The silence-based stall watchdog: an 8 GB save through the bucket mount ran to the end, a frozen save was stopped (exit 93), rank mode under `accelerate launch`, an injected hang stopped with every rank's stack; finish verification through `stage.sh` |
+| 2026-10-21 | 0.10.0 | 1 GPU, two new projects in parallel, automatic level | Install by prompt into an empty folder, then a user-style run to the finish, twice: (a) on Nebius's managed SkyPilot server (1.0.0.dev20261007) without a control host: image build on a short-lived CPU VM, qualification, the worker's limits and notifications, a user-requested stop finalized as `stopped`; (b) the previous workflow with its own control host and the guard (SkyPilot 0.14.1), run to completion. Fixes from both runs are in this release |
 
 ## Not yet tested live
 
 See the roadmap in the README.
 
 
-- v0.10.0's new paths: the worker's limits and notifications, a run without a control host (an existing or provider-managed server), the ordered on-demand fallback, the spot price cap (plan: live tests L0, L1, L1b, L2)
+- v0.10.0 paths a run without failures does not reach: a worker limit stop and its relaunch, the ordered on-demand fallback, a preemption under a provider-managed server, the spot price cap (Nebius offers pricing policies only on some GPU platforms; L40S was refused), the user-stop finalize commands
 - Guard cancel, blind and on-demand fallback paths; the worker deadline stop
 - 8 GPUs on one node; multiple nodes (the goal, not supported yet); any provider other than Nebius; the Minimal tier
 - Control-plane state backup and restore, duplicate-controller fencing

@@ -179,7 +179,7 @@ python3 $R /abs/experiment.json --argv-json "$ARGV" $SCHED | python3 -c 'import 
 print({k: v for k, v in e.items() if k.startswith(("BUDGET_", "CEILING_", "MAX_ATTEMPTS", "FREE_", "STARTUP_"))})'
 ```
 Check: `"valid": true` (read any `warnings`: spend the run's limits cannot see); the limits the worker will
-enforce, as rendered (*(offline only)*). The runway (job time the budget allows at the ceiling) is (total_limit -
+enforce, as rendered. The runway (job time the budget allows at the ceiling) is (total_limit -
 controller_allowance) / ceiling_hourly_usd less the 6-minute shutdown reserve; the validator already checked it covers
 `budget.planned_job_hours`. Before this, add the spend made outside the run so far (qualification, data,
 control host) to `budget.controller_allowance` and note it in `qualification.json`. With the optional guard
@@ -197,7 +197,7 @@ A new run revision (new `run_id`) gets a new `$W`; the earlier run's spend is ca
 ```bash
 NOTIFY_URL=$(sed -n 's/^NOTIFY_URL=//p' $W/secrets.env) python3 <observe-skill>/scripts/notify.py --strict --event check "notification check for $RUN"
 ```
-Check: exit 0 and the message arrived where the user reads it. Then submit (*(offline only)* without the guard):
+Check: exit 0 and the message arrived where the user reads it. Then submit:
 ```bash
 [ -f $W/campaign-start ] || date +%s > $W/campaign-start      # the run's first submission, kept for relaunches
 S=$(date -u +%Y%m%dT%H%M%SZ)

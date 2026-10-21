@@ -33,7 +33,7 @@ qualification's `step_seconds` (the subset can read faster than the full data: p
 they differ by more than 25 %, send the user the new expected end (steps to go x the measured step time) and its
 cost bound: the step count can still change then. A timeout is itself an event: the step stopped advancing or slowed. Read the status and the log
 tail before deciding anything. A `STALL` line means the stall watchdog stopped a hung run (triage below).
-Status and the worker's spend bound at any time (*(offline only)* for the `limits` events):
+Status and the worker's spend bound at any time:
 ```bash
 sky jobs queue -v -o json | python3 -c 'import json,sys; j=next(r for r in json.load(sys.stdin) if r["job_id"]==int(sys.argv[1])); print(j["status"], "recoveries:", j.get("recovery_count"), "cluster:", j.get("current_cluster_name"), j.get("failure_reason") or "")' $JOB
 sky jobs logs --no-follow --tail 0 $JOB | grep CHECKPOINT_JOURNAL | grep '"event": "limits"' | tail -1

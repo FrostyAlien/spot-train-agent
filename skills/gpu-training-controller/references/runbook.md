@@ -9,7 +9,7 @@ access set up by the user; never ask for secret values in chat. Steps marked *(o
 From intake item 15, recorded as `controller.mode` in the contract:
 - **`self-hosted`**: a control host the user runs (steps 1-7 below; step 8 of the SKILL only for a long-lived one).
 - **`existing`** (a server someone else runs, such as a team's) or **`provider-managed`** (a cloud provider's hosted
-  server): no control host; connect to it ([existing server](#an-existing-provider-managed-or-local-server-offline-only)).
+  server): no control host; connect to it ([existing server](#an-existing-provider-managed-or-local-server)).
 - **`local`**: the API server on the operator's machine (`sky api start`), for development and small runs. Managed
   jobs then run their controller on a cloud VM SkyPilot creates (deployment and state: consolidated or separate);
   budget it. Recovery does not depend on the laptop staying awake.
@@ -93,7 +93,8 @@ for every helper that imports SkyPilot (the guard, `render_job.py --validate-wit
 work (image builds, data preparation) through `scripts/stage.sh run NAME -- CMD` and `stage.sh wait NAME`,
 so an SSH drop never kills it.
 
-## An existing, provider-managed or local server *(offline only)*
+## An existing, provider-managed or local server
+*(offline only for an existing or local server; a provider-managed one ran live)*
 Instead of steps 2-5. The client must match the server's version (SkyPilot supports only adjacent client and server
 versions; a server the user does not run picks its own version):
 ```bash
