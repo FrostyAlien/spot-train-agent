@@ -57,10 +57,10 @@ sky launch --dryrun -y $W/tasks/dryrun.yaml
 if $P $R /abs/experiment.json --argv-json "$ARGV" --scheduling-timeout --validate-with-skypilot >/dev/null 2>$W/sched.log
 then SCHED=--scheduling-timeout; else SCHED=; tail -1 $W/sched.log; fi; echo "SCHED=$SCHED"
 ```
-Check: "Parsed and round-tripped" twice and the dry run prints the chosen resources. `SCHED` records whether this
-SkyPilot version accepts `job.wait_for_scheduling_timeout` (empty: it does not, or the contract lacks
-`recovery.max_capacity_wait_minutes`, as the printed line says; then nothing bounds the wait for the first start except
-the optional guard; keep `SCHED` for the run). A `sky` command silent
+Check: "Parsed and round-tripped" twice and the dry run prints the chosen resources. `SCHED` holds `--scheduling-timeout` when
+this SkyPilot version and the contract can bound the wait for the first start (`job.wait_for_scheduling_timeout`).
+Empty `SCHED`: they cannot (the printed line says why), and only the optional guard bounds that wait. Keep the
+value for the run. A `sky` command silent
 for two minutes: read the API server log (controller runbook) before anything else.
 
 ## 1. GPU qualification (once per new stack; inside the approved qualification cap)
@@ -71,8 +71,8 @@ counts. The qualification reads only the subset, so it cannot catch a mismatch i
 Optionally, when the user has a GPU of their own and wants to, the same two starts run there first
 (image runbook: [local test](../../gpu-training-image/references/runbook.md#5-local-test-on-the-users-gpu-optional-offline-only)).
 Build the qualification argv `QARGV`: `ARGV` plus the framework's step settings for `3S + 2` steps, evaluating
-and saving every `S`, with `S` = 6 + the loader's look-ahead per rank in `ARGV` (workers x batches each prefetches;
-for example 4 x 2 = 8, so `S` = 14 and 44 steps; definition: lifecycle entrypoint contract, `qualify`). With a qualification subset (`dataset.qualify_uri`,
+and saving every `S`, with `S` = 6 + the loader's look-ahead (lifecycle entrypoint contract, `qualify`): for example
+4 workers x 2 prefetched batches gives `S` = 14 and 44 steps. With a qualification subset (`dataset.qualify_uri`,
 data skill: staging) the task reads the subset instead of the full dataset, in the same mount mode and with
 the same disk. `ES` is the full eval set's size over the subset's. Leave `--eval-scale` out when the project
 does not evaluate.
