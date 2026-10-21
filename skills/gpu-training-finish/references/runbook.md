@@ -54,9 +54,11 @@ Logs may contain secrets the application printed: review before sharing.
 bash -c 'set -euo pipefail; source "$1"; hook_inventory' _ /abs/provider-hooks.sh
 sky status -u; sky storage ls
 ```
-Check: no run-owned VM or disk left (qualification `q-*` and `fin*` clusters included), and none of the
+Check: no run-owned VM or disk left (qualification `q-*`, `fin*` and `build-*` clusters included), and none of the
 network resources SkyPilot creates per cluster (security groups, IPs): a teardown can leave them behind, so
-the inventory hook lists them. Report what remains (buckets with their partial and superseded checkpoint
+the inventory hook lists them. On a server shared with other people `sky status -u` lists their clusters too:
+judge only your own (names from this run), and never stop or delete a server you do not run. Save the managed-job
+logs before a hosted server's log retention ends. Report what remains (buckets with their partial and superseded checkpoint
 directories, registry images, the control host) with its monthly cost; the user decides what to keep
 (automatic level: the cleanup policy approved at intake).
 

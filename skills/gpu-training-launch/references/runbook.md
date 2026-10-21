@@ -43,7 +43,7 @@ flags() { local sub=$1 h f; shift; h=$(sky $sub --help 2>&1) || { echo "MISSING:
 flags "jobs launch" -y -d -n --secret-file; flags "jobs queue" -v -o; flags "jobs logs" --tail --no-follow --controller
 flags "jobs cancel" -y --graceful --graceful-timeout; flags launch -y -c -d --dryrun --secret-file --env
 flags exec -d --workdir --secret-file; flags logs; flags cancel -y; flags autostop -y -i --down; flags down -y
-flags status -u; flags "storage ls"; flags check; flags "api info"; flags "api login" -e; flags "api start" --deploy --foreground
+flags status -u; flags "storage ls"; flags check; flags "api info" -o; flags "api login" -e --token; flags "api start" --deploy --foreground
 ```
 Check: no `MISSING` line; otherwise adapt that command from this version's `--help` before going on. Then the
 renderer's round trip with the installed SkyPilot (`$P`) for the primary task and the

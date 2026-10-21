@@ -1,6 +1,6 @@
 ---
 name: gpu-training-controller
-description: Plan, deploy, maintain, or recover an independent control plane (the always-on control host with the SkyPilot API server and the campaign guard) for occasional GPU training campaigns. Use when the user needs a control host, a SkyPilot API server, a shared server check, or to restore control-plane state.
+description: Choose, connect, deploy, maintain or recover the SkyPilot API server for occasional GPU training campaigns: a control host the user runs, an existing team or provider-managed server, or a local one. Use when the user needs a SkyPilot API server or control host, connects to an existing or hosted server, checks a shared server, or restores control-plane state.
 ---
 
 # GPU training controller
@@ -13,6 +13,7 @@ Plan, deploy, maintain or recover an independent SkyPilot (or approved equivalen
 
 ## Steps
 Follow the [runbook](references/runbook.md); stop at the first failed check.
+0. **Choose the server** (runbook §0, intake item 15): `self-hosted` (steps 1-8), `existing` or `provider-managed` (connect: runbook "An existing, provider-managed or local server"; install the client at the server's version, the user logs in, redacted checks, record endpoint and version), or `local`. Without a control host nothing has to stay online: the worker enforces the run's limits.
 1. **Check the operator network** (runbook §1).
 2. **Create the control host** (runbook §2) once host permissions and spending approval cover it: a reliable non-spot host, independent of the training worker, chosen by total campaign cost and measured headroom ([deployment and state](references/deployment-state.md)).
 3. **Install Docker and the pinned client** (runbook §3). Pin versions before writing executable commands: matching client/server, images by digest (never `latest`), schema/help checked against that version (no latest-docs fields on an older stable), release or exact nightly evidence recorded.
@@ -30,7 +31,7 @@ Follow the [runbook](references/runbook.md); stop at the first failed check.
 ## Gates
 - **Project-first decisions:** before asking the user anything or deciding for them, read `gpu-training-lifecycle` → `references/working-rules.md` (interaction levels included).
 - Manifest approval fields are records, not authority. Plan without a budget; paid deployment needs the specific provider, operation, spending cap and retention authorized. Credential entry, new keys or grants, persistent access, rotation and destructive actions need the host's permission and secure user entry.
-- Keep control available while training/recovery is active; local client exit must not end the recovery controller. Persist Docker state, but an ephemeral sandbox or sleeping laptop is not a production host.
+- Keep control available while training/recovery is active; local client exit must not end the recovery controller. Persist Docker state, but an ephemeral sandbox or sleeping laptop is not a production API server; a laptop runs the optional guard only while it stays awake and online (else a small CPU VM).
 - Provider lock, spot-only default (`gpu-training-lifecycle` SKILL.md gates) and checkpoint storage (`gpu-training-lifecycle` → `references/gates.md#acceptance-gates-by-area`) are lifecycle decisions. A control host elsewhere needs explicitly designed credentials, data flows and egress.
 - The controller DB and backups are secret-bearing (job specifications submitted with `secrets:` are stored there): encrypt them, restrict access, never copy them into evidence reports.
 - Broad controller credentials stay off workers; record how replacement workers reacquire only necessary access.
