@@ -224,6 +224,12 @@ class ExtensionTests(unittest.TestCase):
         self.assertEqual(j['envs']['NOTIFY_FORMAT'], 'slack')
         self.assertIn('NOTIFY_URL', secret_names(m))
         self.assertNotIn('NOTIFY_URL', secret_names(fixture()))
+    def test_spot_price_cap_reaches_the_primary_worker_only(self):
+        m = fixture(); m['budget']['spot_price_cap'] = {'per_gpu_hour': 1.2, 'cap_id': 'pricingpolicy-e00abc'}
+        self.assertEqual(render(m)['envs']['PRICE_CAP_ID'], 'pricingpolicy-e00abc')
+        self.assertNotIn('PRICE_CAP_ID', render(m, variant='qualify', qualify_tag='q1')['envs'])
+        m['budget']['spot_price_cap']['cap_id'] = 'bad id; rm'
+        with self.assertRaises(ValueError): render(m)
     def test_scheduling_timeout_only_on_request(self):
         m = self.budgeted()
         self.assertNotIn('job', render(m))

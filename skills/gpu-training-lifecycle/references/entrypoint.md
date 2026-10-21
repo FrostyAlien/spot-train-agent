@@ -19,6 +19,7 @@ The rendered task (`gpu-training-launch` → `scripts/render_job.py`) sets:
 | `IMAGE_DIGEST`, `GPU_COUNT` | the image digest and the GPU count from the contract (an image cannot know its own digest): identity fields of every manifest and the preflight journal |
 | `CAMPAIGN_DEADLINE_UTC` | optional absolute deadline (train only; absent by default: the budget is the hard stop) |
 | `CAMPAIGN_SUBMITTED_AT`, `BUDGET_LIMIT_USD`, `BUDGET_RESERVED_USD`, `BUDGET_SPENT_BEFORE_USD`, `CEILING_HOURLY_USD`, `FREE_WITHOUT_VM`, `STARTUP_ALLOWANCE_MINUTES`, `MAX_ATTEMPTS_WITHOUT_PROGRESS`, `MAX_ATTEMPTS` | the run's limits (train only), passed to `checkpoint_marker.py limits` at every start (below); no secrets |
+| `PRICE_CAP_ID` | optional (`budget.spot_price_cap.cap_id`): the provider's spot price cap for `hook_price_cap` (provider hooks: optional spot price cap) |
 | `NOTIFY_URL`, `NOTIFY_FORMAT` | the notification channel, from the launch's secrets file; `notify.py` reads them (no URL: notices are skipped with a warning) |
 | `SECRET_NAMES` | secrets the launch supplies as environment variables (the `SKYPILOT_DOCKER_*` ones are consumed by SkyPilot for the image pull) |
 | `WANDB_*` or `METRICS_BACKEND` | the researcher's metrics choice; qualification runs get their own metrics run id |
@@ -126,6 +127,10 @@ wrapper(argv):                                    # one process per node, the ta
     if RUN_MODE != rehearsal:
         report = gpu_preflight.probe(expected_gpus, expected_platform, min_free_gb=disk budget)   # as `gpu_preflight.py probe` does: print the JSON; exit 4 when not ok
         journal(run, attempt, "preflight", report + identity)   # image digest, dataset version, world size
+    if RUN_MODE == train and PRICE_CAP_ID is set:  # optional: each new VM caps its own spot price (provider hooks)
+        if hook_price_cap(PRICE_CAP_ID) == "switched":   # put under the cap and asked to stop: SkyPilot restarts it
+            journal(run, attempt, "price_cap", state="switched"); notify("spot price cap set; restarting this VM", "price_cap")
+            sleep up to 10 minutes for the stop; exit 3   # never exit 0 here: that would end the job
     if RUN_MODE == train:                         # the run's limits; no outside guard is needed
         limits = checkpoint_marker.limits(run, the rendered budget values above)   # as `checkpoint_marker.py limits`
         journal(run, attempt, "limits", **limits)  # a relaunch and the finish read the spend bound here

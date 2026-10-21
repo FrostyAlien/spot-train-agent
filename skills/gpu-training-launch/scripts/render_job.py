@@ -391,6 +391,11 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
                     MAX_ATTEMPTS_WITHOUT_PROGRESS=str(no_progress))
         if rec.get('max_attempts') is not None:
             envs['MAX_ATTEMPTS'] = str(rec['max_attempts'] + (rec.get('planned_drills') or 0))
+    cap = budget.get('spot_price_cap')
+    if isinstance(cap, dict) and use_spot and variant == 'primary':
+        require(isinstance(cap.get('cap_id'), str) and re.fullmatch(r'[A-Za-z0-9_.:/-]{1,200}', cap['cap_id']),
+                'budget.spot_price_cap.cap_id must be the provider object ID')
+        envs['PRICE_CAP_ID'] = cap['cap_id']       # the worker caps its own VM (provider hook hook_price_cap)
     watch_env = watchdog_env(m, timeout_minutes * 60 if variant in QUALIFY else None) if variant != 'verify' else {}
     watch = f'python3 {WATCHER} watch -- ' if watch_env else ''      # wraps the launcher (observe skill)
     if watch_env:

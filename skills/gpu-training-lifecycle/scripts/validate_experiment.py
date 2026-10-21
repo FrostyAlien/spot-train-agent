@@ -142,6 +142,15 @@ def validate(d, phase='plan', locked=None):
     stalled=d['recovery'].get('max_attempts_without_progress')
     if stalled is not None and (type(stalled) is not int or stalled<1): err('recovery.max_attempts_without_progress must be a positive integer')
     if 'free_without_vm' in d['budget'] and not isinstance(d['budget']['free_without_vm'],bool): err('budget.free_without_vm must be true or false (from the provider research record)')
+    cap=d['budget'].get('spot_price_cap')
+    if cap is not None:
+        price=cap.get('per_gpu_hour') if isinstance(cap,dict) else None
+        if not (isinstance(cap,dict) and set(cap)<={'per_gpu_hour','cap_id'} and isinstance(price,(int,float))
+                and not isinstance(price,bool) and math.isfinite(price) and price>0
+                and isinstance(cap.get('cap_id'),str) and re.fullmatch(r'[A-Za-z0-9_.:/-]{1,200}',cap['cap_id'])):
+            err('budget.spot_price_cap must be {per_gpu_hour > 0, cap_id: the provider object ID}')
+        elif d.get('purchase_model') not in (None,'spot'):
+            err('budget.spot_price_cap applies only to spot runs')
     if d['budget'].get('planned_job_hours') is not None: number('budget.planned_job_hours',positive=True)
     code=d.get('code')
     if code is not None and not isinstance(code,dict): err('code must be an object {repo, commit}')

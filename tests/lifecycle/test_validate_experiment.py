@@ -317,6 +317,14 @@ class ContractTests(unittest.TestCase):
         self.assertTrue(any('after_capacity_wait_minutes' in e for e in validate(d,'launch')))
         d['recovery']['on_demand_fallback']['after_capacity_wait_minutes']=30
         self.assertEqual(validate(d,'launch'),[])
+    def test_spot_price_cap(self):
+        d=copy.deepcopy(self.ready); d['budget']['spot_price_cap']={'per_gpu_hour':1.2,'cap_id':'pricingpolicy-e00abc'}
+        self.assertEqual(validate(d,'launch'),[])
+        for bad in ({'per_gpu_hour':0,'cap_id':'x'},{'per_gpu_hour':1.2},{'per_gpu_hour':1.2,'cap_id':'x','url':'y'}):
+            e=copy.deepcopy(d); e['budget']['spot_price_cap']=bad
+            self.assertTrue(any('spot_price_cap' in x for x in validate(e,'launch')),bad)
+        e=copy.deepcopy(d); e['purchase_model']='on-demand'
+        self.assertTrue(any('only to spot' in x for x in validate(e,'launch')))
     def test_watchdog_settings(self):
         d=copy.deepcopy(self.ready)
         d['watchdog']={'k':5,'limits':{'train':240,'eval':900,'save':600,'final':600,'startup':1800},'ceilings':{'final':7200},

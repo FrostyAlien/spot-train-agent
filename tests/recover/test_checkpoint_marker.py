@@ -588,6 +588,15 @@ class LimitsTests(unittest.TestCase):
         past = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.NOW - 1))
         self.assertEqual(self.limits(deadline=past)['limit'], 'deadline')
 
+    def test_a_price_cap_restart_is_not_an_allocation(self):
+        self.start('a1', commit=True)
+        cm.journal(self.run, 'a2', 'preflight')
+        cm.journal(self.run, 'a2', 'price_cap', {'state': 'switched'})   # capped its new VM and stopped it
+        self.start('a3')                                               # this start, on the capped VM
+        r = self.limits(max_attempts_without_progress=1)
+        self.assertEqual((r['allocations'], r['allocations_without_progress']), (2, 0))
+        self.assertIsNone(r['limit'])
+
     def test_new_outcomes_are_accepted_by_finalize(self):
         for outcome in ('budget_stopped', 'no_progress_stopped', 'attempts_stopped'):
             self.assertIn(outcome, cm.OUTCOMES)

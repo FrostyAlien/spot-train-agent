@@ -31,3 +31,8 @@ hook_storage_delete() {                      # $1 = object-store URI prefix endi
   echo "TODO: delete every object under $1 with the provider's storage CLI" >&2
   return 1
 }
+
+hook_price_cap() {                           # $1 = the provider's price-cap object ID (optional; runs inside the worker)
+  echo "TODO: print capped if this VM runs under cap $1; else put it under the cap, request a stop, print switched" >&2
+  return 1
+}

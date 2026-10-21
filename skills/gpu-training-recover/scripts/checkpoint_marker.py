@@ -432,7 +432,9 @@ def limits(run_dir, *, submitted_at: float, ceiling_hourly: float, budget: float
     now = time.time() if now is None else now
     if not ceiling_hourly > 0 or not budget > 0:
         raise ValueError('ceiling_hourly and budget must be positive')
-    runs = _starts(read_journal(run_dir))
+    # A start that only put its new VM under the spot price cap and stopped it is not an allocation of its own.
+    runs = [r for r in _starts(read_journal(run_dir))
+            if not any(e.get('event') == 'price_cap' and e.get('state') == 'switched' for e in r)]
     allocations = len(runs)
     without_progress = 0
     for run in reversed(runs[:-1]):                 # earlier starts in a row that ended without a commit
