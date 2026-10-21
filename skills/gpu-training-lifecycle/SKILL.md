@@ -63,7 +63,8 @@ Scope: one SkyPilot-launched cloud VM with up to eight GPUs; flag larger or dist
 - [gates.md](references/gates.md): read before the first launch of a stack, when the SkyPilot version changes, or when provider, region, GPU or purchase mode changes.
 - [official-skypilot.md](references/official-skypilot.md#loading-the-official-skill): read before using the official `skypilot` skill for CLI/YAML/SDK specifics.
 - [provider-research.md](references/provider-research.md): read when the user picks a provider or the SkyPilot version changes.
-- [provider-hooks.md](references/provider-hooks.md): read when writing the project's provider hooks for the runbooks.
+- [provider-hooks.md](references/provider-hooks.md): read when writing the project's provider hooks for the runbooks, or setting up the optional spot price cap.
+- [providers/nebius.md](references/providers/nebius.md): read when the provider is Nebius (a dated starting point: its managed SkyPilot server, research rows, hooks and the spot price cap).
 - [entrypoint.md](references/entrypoint.md): read when writing or reviewing the training image's entrypoint.
 - [pytorch.md](references/pytorch.md): read with entrypoint.md when the project uses PyTorch (its collective timeout setting, rank mode for scripts without hooks, hang dumps, checkpoints and restore).
 - [evidence.md](references/evidence.md): read before pinning integrations or labelling evidence.

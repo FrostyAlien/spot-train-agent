@@ -120,16 +120,15 @@ flowchart LR
   run["Training on<br/>a spot VM"] -->|saves| ckpt[("Verified checkpoint<br/>in the provider's bucket")]
   run -->|preempted| sky["SkyPilot managed job<br/>gets a new spot VM"]
   sky -->|restore newest<br/>verified checkpoint| run
-  guard["Guard on the<br/>control host"] -.->|watches| run
-  guard -->|limit reached| stop["Cancel the run"]
-  guard -->|milestones, recoveries,<br/>stalls, spend| agent["You and<br/>your agent"]
+  run -->|budget, deadline or<br/>no progress reached| stop["Stops itself,<br/>exit 0"]
+  run -->|started, resumed, evaluations,<br/>stalls, stop| agent["You and<br/>your agent"]
   agent --> judge{"On track at the<br/>planned evaluation?"}
   judge -->|yes| run
   judge -->|no| report["Agent reports<br/>and asks you"]
 ```
 
 - **Recovery needs no agent online.** SkyPilot replaces a preempted VM on the same provider, and the container restores the newest checkpoint that verifies.
-- **The guard** on the control host enforces the approved budget, deadline and attempt limits, and notifies you of milestones, recoveries, stalls and spend. Inside the VM, a stall watchdog stops a run that hangs.
+- **The run guards itself.** At every start the training container checks the approved budget, deadline and attempts, stops cleanly when one is reached, and notifies you when it starts, resumes, evaluates, stalls or stops. Inside the VM, a stall watchdog stops a run that hangs. Nothing has to stay online next to the job, so an existing SkyPilot server (a team's, a provider-managed one, or a local one) is enough; an optional outside guard adds a limit on waiting for capacity after a preemption.
 - **The agent** wakes on notifications and at planned evaluations, reads the metrics, judges whether training is on track and reports to you. It never changes code on its own.
 
 ## Roadmap
@@ -140,7 +139,8 @@ Works now:
 - [x] One node with 1-8 GPUs, any ML framework
 - [x] Build and test the training image with you
 - [x] Recover from spot preemption: replacement on the same provider, resume from the newest verified checkpoint
-- [x] Guard with budget, deadline, attempt and capacity-wait limits, and notifications
+- [x] Budget, deadline and attempt limits enforced by the run itself, and notifications from the worker
+- [x] Runs on your own control host, or on an existing, provider-managed or local SkyPilot server
 - [x] Stall watchdog that stops a hung run instead of letting it bill
 - [x] Agent check-ins at planned evaluations: progress, spend and training quality
 - [x] TB-scale datasets in the provider's storage, or read from Hugging Face at a pinned revision
@@ -152,7 +152,8 @@ Next:
 - [ ] Multi-node training
 - [ ] Live test of reusing your own image and of the local test on your own GPU
 - [ ] Live test with 8 GPUs on one node
-- [ ] Run on an existing SkyPilot server with no control host: limits from SkyPilot's own settings and the worker, guard optional
+- [ ] Live test of a run without a control host (Nebius's managed SkyPilot server)
+- [ ] Spot price cap through a provider pricing policy (Nebius), live test
 - [ ] Live test of the guard's on-demand fallback and cancel paths
 - [ ] Control-plane backup and restore
 

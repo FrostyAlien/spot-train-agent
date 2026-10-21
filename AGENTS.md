@@ -33,7 +33,7 @@ No third-party packages are needed for the unit tests. Set `PYTHONDONTWRITEBYTEC
 These come from the maintainer's decisions during live tests; follow them unless an issue changes them.
 
 - **Stay generic.** For each change ask: would a different project on a different provider need this? Fixes for one library's bug, one test project, one operator machine or the test harness stay out of the skills.
-- **No vendor tables.** No GPU-architecture tables, prices or provider fact files in `skills/`. Write procedures and research checklists; the agent researches the provider when the user picks it and records dated findings in the user's project. Provider-specific commands belong in the project's provider hooks file (template: `gpu-training-lifecycle/assets/provider-hooks.example.sh`).
+- **No vendor tables.** No GPU-architecture tables, prices or provider fact files in `skills/`, except dated provider profiles in `gpu-training-lifecycle/references/providers/` (Nebius today): each fact carries a check date and a source, and the agent re-checks every row it uses. Write procedures and research checklists; the agent researches the provider when the user picks it and records dated findings in the user's project. Provider-specific commands belong in the project's provider hooks file (template: `gpu-training-lifecycle/assets/provider-hooks.example.sh`).
 - **Code only where it runs unattended or checks deterministically** (guard, watchdog, checkpoint marker/verifier, validator, renderer, cost calculator, preflight). Orchestration is a runbook of CLI commands with a check after each step. No template training code; examples in references are pseudo-code.
 - **Never pin a SkyPilot version in the skills.** The agent picks it at the start and keeps it for the run. Defer `sky` CLI/YAML detail to SkyPilot's docs and the official `skypilot` skill.
 - **Lean checks.** Compatibility checks run once at the start of a project and after an upgrade, not before every launch. Do not add per-launch gates or optional guard features without a concrete failure that needs them.
@@ -66,5 +66,6 @@ These come from the maintainer's decisions during live tests; follow them unless
   git archive --format=zip --prefix=spot-trainer/ -o spot-trainer-vX.Y.Z.zip vX.Y.Z
   ```
 
+- Build each release on its own branch, `release/vX.Y.Z`, in a separate worktree (the shared checkout stays on `main`). Merge it into `main` through a pull request only after the tests, the review and the live test pass (a merge commit, no squash); tag on `main`. Live-test fixes land on the release branch first.
 - Each release's scope goes in the release notes on the tag (the GitHub release text), written for users: what changed and why, without links to private records.
 - Research notes, reviews, benchmarks and live-test logs stay out of this repository. `.gitignore` lists the maintainer's private files that sit beside the tracked ones; never force-add them.
