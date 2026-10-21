@@ -188,8 +188,9 @@ control host) to `budget.controller_allowance` and note it in `qualification.jso
 carried-over spend and attempts.
 Every spend figure here and in later reports is an upper bound at the on-demand price; the real spot cost
 comes from the provider's bill. Approval at the interaction level: SKILL step 8. The guard's notify command
-receives one JSON message on stdin; it reads the URL from the secrets file, so the URL never sits in its argv or
-the guard's files (for example `["bash","-c","curl -sS -d @- \"$(sed -n s/^NOTIFY_URL=//p /abs/<W>/secrets.env)\""]`).
+receives one JSON message on stdin; it reads the URL from the secrets script (the secrets file is deleted after the
+launch), so the URL never sits in its argv or the guard's files (for example
+`["bash","-c","curl -sS -d @- \"$(bash /abs/secrets-env.sh | sed -n s/^NOTIFY_URL=//p)\""]`).
 
 ## 4. Submit (Standard tier), then the optional guard
 A new run revision (new `run_id`) gets a new `$W`; the earlier run's spend is carried in `budget.controller_allowance`.

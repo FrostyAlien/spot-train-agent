@@ -18,7 +18,7 @@ claude plugin marketplace add https://github.com/skypilot-org/skypilot.git --spa
 claude plugin install spot-trainer --marketplace https://github.com/FrostyAlien/spot-trainer.git --scope project
 ```
 
-Use `--scope user` on both for every project. `--sparse` skips checking out the whole SkyPilot repository. The HTTPS URLs work on machines without GitHub SSH keys. Marketplaces are registered once per machine, by name. If `claude plugin marketplace list` already shows a `spot-trainer` from another source (a fork or a local copy), adding this one repoints it for every project on the machine.
+Use `--scope user` on both for every project. `--sparse` skips checking out the whole SkyPilot repository. The HTTPS URLs work on machines without GitHub SSH keys. Marketplaces are registered once per machine, by name. If `claude plugin marketplace list` already shows a `spot-trainer` from another source (a fork or a local copy), adding this one repoints it for every project on the machine. Keep one source.
 
 Check: `claude plugin list` shows `spot-trainer@spot-trainer` and `skypilot@skypilot` enabled; `claude plugin details spot-trainer` lists the nine skills plus `start`, and `claude plugin details skypilot` one skill. They load in the next session (or after `/reload-plugins`). If `spot-trainer` shows `failed to load` with a missing `skypilot@skypilot`, the first command was skipped: run it, then `/reload-plugins`.
 
