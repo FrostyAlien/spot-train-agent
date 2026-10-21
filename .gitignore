@@ -25,7 +25,6 @@ secrets-env.sh
 .idea/
 .DS_Store
 
-# Maintainer's private records: kept on disk, never pushed
-CHANGELOG.md
-REVIEW.md
-examples/
+# Maintainer's private workspace (notes, live tests, runs, logs, venvs): kept on disk, never pushed
+/dev/
+CLAUDE.local.md

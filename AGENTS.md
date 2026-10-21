@@ -67,4 +67,4 @@ These come from the maintainer's decisions during live tests; follow them unless
   ```
 
 - Each release's scope goes in the release notes on the tag (the GitHub release text), written for users: what changed and why, without links to private records.
-- Research notes, reviews, benchmarks and live-test logs stay out of this repository. `.gitignore` lists the maintainer's private files that sit beside the tracked ones; never force-add them.
+- Research notes, reviews, benchmarks and live-test logs stay out of this repository. The maintainer keeps them in the gitignored `dev/` folder; never force-add it, and never run `git clean -x` or `-X`, which deletes it.
