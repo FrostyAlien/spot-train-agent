@@ -74,6 +74,10 @@ script's docstring.
 - **Lines:** a stall prints one `STALL` line and every rank's stack, then exits 93 (triage: [runbook](runbook.md),
   row 93). A `PROGRESS` line comes every 5 minutes. A collective timeout shorter than the quiet limit ends a
   collective hang first (exit 1 or 134).
+- **From the worker itself:** with the notification secret (`NOTIFY_URL`, `NOTIFY_FORMAT`) the stall is sent through
+  `scripts/notify.py` before the stop. With `CHECKPOINT_DIR` set, the watchdog also keeps this allocation's alive
+  file on the checkpoint mount (rewritten with every `PROGRESS` line), which the run's limits read (recover
+  `references/contract.md#4-crash-safe-checkpoint-publication-on-a-skypilot-bucket-mount`, item 6).
 - **Guard:** it notifies the `STALL` line when a tick reads it in time (otherwise `job terminal: FAILED`).
   *(offline only)* A RUNNING job whose readable log has no `PROGRESS` line for three periods (the VM or the watchdog
   froze) is notified as "wedged" and cancelled after `wedged_grace_minutes` (15). An unreadable log is only notified.

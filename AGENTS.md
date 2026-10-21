@@ -39,7 +39,7 @@ These come from the maintainer's decisions during live tests; follow them unless
 - **Lean checks.** Compatibility checks run once at the start of a project and after an upgrade, not before every launch. Do not add per-launch gates or optional guard features without a concrete failure that needs them.
 - **Follow SkyPilot's defaults** for credentials and security; offer hardening only as a pointer to SkyPilot's docs. Keep the basics: no secrets in chat, files or images; ask before spending; exact-ID cleanup only.
 - **Helpers use only the Python standard library** (3.10+), take absolute paths and are covered by tests in `tests/<skill>/`.
-- **Helpers copied into the training image** (`checkpoint_marker.py`, `verify_checkpoint.py`, `gpu_preflight.py`, `progress_watch.py`, `torch_rank.py`; image skill step 6) run inside users' containers at `/opt/gpu-skills/`. Keep them self-contained single files.
+- **Helpers copied into the training image** (`checkpoint_marker.py`, `verify_checkpoint.py`, `gpu_preflight.py`, `progress_watch.py`, `notify.py`, `torch_rank.py`; image skill step 6) run inside users' containers at `/opt/gpu-skills/`. Keep them self-contained single files.
 - **Do not claim what did not run.** A runbook step that has not run live keeps its *(offline only)* marker; VALIDATION.md records only checks that were performed.
 
 ## Writing skill text
