@@ -83,11 +83,11 @@ approved by the user), it never silently continues with different hyperparameter
   Its argv is the real argv plus the framework's own settings for the step count and the save and evaluation
   intervals, never a debug mode that turns saving off. Default shape: save (and evaluate, when the project
   evaluates) every `S` steps and train `3S + 2`, with `S` = 6 + `L`. `L` is the loader's look-ahead on one
-  rank: its background workers x the batches each prefetches (for an auto-tuned buffer, its upper bound; 0
+  rank: its background workers x the batches each prefetches (an auto-tuned buffer: its upper bound, or set a fixed prefetch for the qualification; 0
   without background loading, which gives 20 steps). The loader fills `L` batches during startup and again
   during every save and evaluation, so the first `L` steps after each run on ready batches and show only the
-  GPU's speed; the last 6 steps before each save run at the data's real pace. Count `L` in batches and `S` in
-  steps: with gradient accumulation the run is only longer than needed. Size the subset so the `3S + 2` steps
+  GPU's speed; the last 6 steps before each save run at the data's real pace. `L` counts batches and `S` counts
+  steps: with gradient accumulation one step uses several batches, so `S` is more than enough. Size the subset so the `3S + 2` steps
   cross one epoch boundary: epoch-start work then shows in the measured gaps.
   The task runs the entrypoint twice and checks the journal (`checkpoint_marker.py journal-check`):
   - start 1 (fresh) stops after its second commit (steps `S` and `2S`; the second save shows the steady

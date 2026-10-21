@@ -40,11 +40,11 @@ prune list cannot read is skipped). Report both.
 
 **A run the user stops early** *(offline only)*: cancel its job by id, gracefully (``observe `references/commands.md` ``),
 and wait until it is terminal. When the user wants the newest committed checkpoint as the result, run step 2 and
-skip its `sky down`: the verify task prints `FINISH no readable FINAL.json`, and its cluster stays up with the
-helpers and the bucket mounted, until its 10-minute autodown. Then write FINAL.json there (`finalize` always names the newest committed
+skip its `sky down`: its exit 3 with `FINISH no readable FINAL.json` is expected here, and its cluster stays up
+with the helpers and the bucket mounted until its 10-minute idle autodown. Right after that, write FINAL.json there (`finalize` always names the newest committed
 checkpoint that verifies, with the identity of its manifest):
 ```bash
-sky exec fin$S -- 'R=$CHECKPOINT_DIR; H=/opt/gpu-skills/checkpoint_marker.py
+sky exec fin$S -- 'R=<CHECKPOINT_DIR in $W/tasks/verify-$S.yaml>; H=/opt/gpu-skills/checkpoint_marker.py
 D=$(python3 $H prune-list "$R" | python3 -c "import json,sys; print(json.load(sys.stdin)[\"keep\"][0])")
 read MV CS FS < <(python3 -c "import json,sys; m=json.load(open(sys.argv[1])); print(m[\"model_version\"], m.get(\"code_sha256\",\"-\"), m.get(\"config_sha256\",\"-\"))" "$R/$D/manifest.json")
 python3 $H finalize "$R" --mount-root /checkpoints --run-id <run id> --data-version <dataset version> \
@@ -53,8 +53,8 @@ python3 $H finalize "$R" --mount-root /checkpoints --run-id <run id> --data-vers
 ```
 Add `--artifact <path>` to the `finalize` line for each file the user needs that is already in the run directory
 (an exported model). Then check it with `sky exec fin$S $W/tasks/verify-$S.yaml` (`FINISH-VERIFY` reports
-`"outcome": "stopped"`) and `sky down -y fin$S`. Another checkpoint
-than the newest is not finalized: report its directory for the user to copy.
+`"outcome": "stopped"`) and `sky down -y fin$S`. To keep an older
+checkpoint instead, do not finalize: report its directory so the user can copy it.
 
 ## 3. Evidence
 ```bash

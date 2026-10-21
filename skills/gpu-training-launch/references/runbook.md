@@ -93,8 +93,8 @@ second save, then a resume to the end and `finalize`), then
 `wait` as a background command: it returns when the launch ends. The task usually takes about 2-3 minutes once the
 allocation has started (after provisioning, image pull and mounts) and fails fast at the first broken step. `--timeout-minutes` bounds each start: the time to
 the first step (model download, compilation; 10 minutes until `startup_seconds` is measured) plus 10 minutes
-for the steps, evaluations and saves; raise it when `2S` steps at the expected step time plus two saves and two
-evaluations come near 10 minutes. Each start runs under the stall watchdog with its default limits, not the
+for the steps, evaluations and saves; raise it when `2S` steps plus two saves and two
+evaluations could take more than about 8 minutes (estimate from the project's known step time). Each start runs under the stall watchdog with its default limits, not the
 contract's, so a hang ends within minutes with a `STALL` line and the ranks' stacks. A hang before the first tick
 ends two minutes before the per-start timeout (up to a 32-minute timeout), without stacks; a slow but healthy
 startup there needs a larger `--timeout-minutes`. The limits, and a `STALL` during healthy silent work:
@@ -127,10 +127,9 @@ After a pass, set these and report them to the user in one block:
   1.25 x `checkpoint_gb` + 10 GB fit beside the image and data. Both rules: `gpu-training-recover` →
   `references/contract.md#checkpoint-size-path-and-save-interval`.
 - **Data:** `loader_wait_fraction` (or `read_mb_s` for `MOUNT` data): above 0.3 the run is limited by data
-  loading, not the GPU. Report it and ask: the fixes in the data skill
-  (`gpu-training-data` → `references/staging.md#measure-io-in-the-qualification-task`) change the configuration
-  (a deviation in the automatic level) and the look-ahead, so qualify again with the new `S`; or the user accepts
-  the measured rate.
+  loading, not the GPU. Report it and ask the user to choose: a fix from the data skill
+  (`gpu-training-data` → `references/staging.md#measure-io-in-the-qualification-task`), then qualify again with
+  the new `S` (the fix changes the look-ahead; a deviation in the automatic level), or the measured rate.
 - **Time:** the expected training time is `step_seconds` x the target steps, plus the evaluations
   (`eval_seconds` scaled by the full eval set's size over the subset's); the observe runbook's planned waits
   use it. The first planned evaluation checks it against the main run's rate (observe runbook).
