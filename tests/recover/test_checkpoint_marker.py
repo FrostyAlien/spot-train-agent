@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -488,6 +489,108 @@ class CommitLineAndJournalCheckTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(cm.main(['journal-check', str(self.run), '--expect', 'fresh']), 0)
             self.assertEqual(cm.main(['journal-check', str(self.run), '--expect', 'fresh,resume']), 1)
+
+
+class LimitsTests(unittest.TestCase):
+    """The worker's own limits at each start (no guard): spend upper bound, allocations, no progress, deadline."""
+    NOW = 1_800_000_000.0
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.run = Path(self.tmp.name) / 'run-a'
+        self.run.mkdir()
+
+    def start(self, attempt, commit=False):
+        cm.journal(self.run, attempt, 'preflight')
+        if commit:
+            cm.journal(self.run, attempt, 'commit', {'step': '6'})
+
+    def alive(self, name, start, last, period=300):
+        d = self.run / 'alive'
+        d.mkdir(exist_ok=True)
+        (d / f'{name}.json').write_text(json.dumps({'start': start, 'last': last, 'period_seconds': period}))
+
+    def limits(self, **kw):
+        args = dict(submitted_at=self.NOW - 2 * 3600, ceiling_hourly=2.0, budget=10.0, now=self.NOW)
+        args.update(kw)
+        return cm.limits(self.run, **args)
+
+    def test_since_submission_bound_and_stop_time(self):
+        self.start('a1')
+        r = self.limits()
+        self.assertIsNone(r['limit'])
+        self.assertEqual(r['spend_basis'], 'since_submission')
+        self.assertEqual(r['spend_upper_usd'], 4.0)                    # 2 h x 2 USD
+        self.assertAlmostEqual(r['runway_hours'], 3 - 5 / 60, places=3)  # (10 - 4) / 2, less the shutdown reserve
+        stop = cm._epoch(r['stop_at_utc'])
+        self.assertAlmostEqual(stop, self.NOW + (3 - 5 / 60) * 3600, delta=1)
+
+    def test_reserved_and_earlier_jobs_count(self):
+        self.start('a1')
+        r = self.limits(reserved=1.0, spent_before=4.5)
+        self.assertEqual(r['spend_upper_usd'], 9.5)
+        self.assertIsNone(r['limit'])                                  # 15 min left, more than the 5 min reserve
+        self.assertAlmostEqual(r['runway_hours'], 0.25 - 5 / 60, places=3)
+        self.assertEqual(self.limits(reserved=1.0, spent_before=4.9)['limit'], 'budget')   # 3 min left
+
+    def test_budget_reached_exits_5_on_the_cli(self):
+        self.start('a1')
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cm.main(['limits', str(self.run), '--submitted-at', str(self.NOW - 10 * 3600),
+                            '--ceiling-hourly', '2', '--budget', '10', '--now', str(self.NOW)])
+        self.assertEqual(code, cm.LIMIT_EXIT)
+        self.assertEqual(json.loads(out.getvalue())['limit'], 'budget')
+
+    def test_free_without_vm_counts_allocations_not_waiting(self):
+        self.start('a1', commit=True)
+        self.start('a2')
+        self.alive('a1', self.NOW - 2 * 3600, self.NOW - 1.5 * 3600)   # 30 min, then preempted
+        self.alive('a2', self.NOW - 600, self.NOW - 60)                 # this allocation
+        r = self.limits(free_without_vm=True, submitted_at=self.NOW - 20 * 3600)
+        self.assertEqual(r['spend_basis'], 'allocations')
+        # spans 1800 + 540 s, plus a period of 300 s each, plus 10 min of startup per allocation
+        hours = (1800 + 540 + 2 * 300 + 2 * 600) / 3600
+        self.assertAlmostEqual(r['spend_upper_usd'], round(hours * 2, 2), places=2)
+        self.assertIsNone(r['limit'])                                  # 20 h of waiting is free
+
+    def test_unreadable_alive_files_fall_back_to_the_time_since_submission(self):
+        self.start('a1')
+        (self.run / 'alive').mkdir()
+        (self.run / 'alive' / 'a1.json').write_text('{"start": ')
+        r = self.limits(free_without_vm=True)
+        self.assertEqual(r['spend_basis'], 'since_submission')
+        self.assertIn('alive files unreadable (a1.json)', r['notes'])
+
+    def test_allocations_without_progress_in_a_row(self):
+        self.start('a1', commit=True)
+        self.start('a2')
+        self.start('a3')
+        self.start('a4')                                               # this start
+        r = self.limits(max_attempts_without_progress=3)
+        self.assertEqual(r['allocations_without_progress'], 2)
+        self.assertIsNone(r['limit'])
+        self.assertEqual(self.limits(max_attempts_without_progress=2)['limit'], 'no_progress')
+
+    def test_absolute_attempts_cap(self):
+        for a in ('a1', 'a2', 'a3'):
+            self.start(a, commit=True)
+        self.assertIsNone(self.limits(max_attempts=3)['limit'])
+        self.assertEqual(self.limits(max_attempts=2)['limit'], 'attempts')
+
+    def test_deadline_caps_the_stop_time_and_ends_the_run(self):
+        self.start('a1')
+        soon = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.NOW + 600))
+        r = self.limits(deadline=soon)
+        self.assertEqual(r['stop_at_utc'], soon)
+        self.assertIsNone(r['limit'])
+        past = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.NOW - 1))
+        self.assertEqual(self.limits(deadline=past)['limit'], 'deadline')
+
+    def test_new_outcomes_are_accepted_by_finalize(self):
+        for outcome in ('budget_stopped', 'no_progress_stopped', 'attempts_stopped'):
+            self.assertIn(outcome, cm.OUTCOMES)
 
 
 if __name__ == '__main__':

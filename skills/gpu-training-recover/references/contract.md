@@ -34,6 +34,7 @@ Layout under the run's checkpoint prefix. `checkpoint.uri` is `<bucket>/<prefix>
 <step, 12 digits>-<attempt>/manifest.json  sizes, SHA-256, roles, identities
 <step, 12 digits>-<attempt>/COMMITTED.json written last
 journal/<attempt>/<seq>-<event>.json       per-attempt events, one write-once file each
+alive/<start>-<host>.json                  per allocation, rewritten by the stall watchdog each progress period
 FINAL.json                                 written once at the end by `finalize`
 ```
 
@@ -44,7 +45,19 @@ FINAL.json                                 written once at the end by `finalize`
 3. Uploads run in parallel and their order is not guaranteed, so the small marker can reach the bucket before its payload; restore verifies every file. A marker without its payload makes that checkpoint look damaged, and selection falls back to the previous one. The first checkpoint of a run has nothing to fall back to: selection then blocks (exit 3, "committed but none verifies"); a person checks in the bucket that its files are missing, deletes that directory from the control host and relaunches, which starts fresh. A stopped VM that SkyPilot restarts keeps its upload cache and resumes pending uploads, so its listing can briefly show a checkpoint that is not yet in the bucket; that checkpoint is complete on disk and safe to restore.
 4. Never delete checkpoints from the training worker: `commit()` returns while uploads of the newest checkpoints may still be queued, and deleting an older directory through the mount removes it from the bucket immediately. Keep everything during the run, or prune from outside the worker with `checkpoint_marker.py prune-list` (the finish runbook's pruning; usable during a long run too), and at finish keep the final and referenced best checkpoints. Directories without a marker are interrupted saves; `prune-list` includes the old ones.
 
-5. **Journal and final record.** The entrypoint's wrapper (preflight, selection) and rank 0 (commits, finish) record each worker start's events with `checkpoint_marker.py journal $CHECKPOINT_DIR --attempt $CHECKPOINT_ATTEMPT --event <preflight|selection|commit|deadline|finish> [--field k=v]`: `sky jobs logs` returns only the last attempt, so the journal is the durable lineage of every attempt (read it with `journal-show`). At the end, inside the worker after the last commit, rank 0 runs `finalize` with the outcome (`completed` with `--target-step`, `deadline_stopped` or `stopped`) and `--artifact` for every extra file the user needs at finish (best model, exported metrics), which must already be on the mount: only the resume state is otherwise durable, so a best model kept on the worker's disk is lost when a replacement takes over. The finish stage checks the record with `verify-final` against the bucket.
+5. **Journal and final record.** The entrypoint's wrapper (preflight, selection) and rank 0 (commits, finish) record each worker start's events with `checkpoint_marker.py journal $CHECKPOINT_DIR --attempt $CHECKPOINT_ATTEMPT --event <preflight|selection|commit|deadline|finish> [--field k=v]`: `sky jobs logs` returns only the last attempt, so the journal is the durable lineage of every attempt (read it with `journal-show`). At the end, inside the worker after the last commit, rank 0 runs `finalize` with the outcome (`completed` with `--target-step`, `deadline_stopped`, `stopped`, or the limit that ended the run:
+`budget_stopped`, `no_progress_stopped`, `attempts_stopped`) and `--artifact` for every extra file the user needs at finish (best model, exported metrics), which must already be on the mount: only the resume state is otherwise durable, so a best model kept on the worker's disk is lost when a replacement takes over. The finish stage checks the record with `verify-final` against the bucket.
+
+6. **The run's limits, from inside the worker.** At each start, after the preflight is journaled, the wrapper runs
+`checkpoint_marker.py limits $CHECKPOINT_DIR` with the rendered budget values (lifecycle `references/entrypoint.md#inputs`).
+It reads the journal (allocations, and those in a row that ended without a commit) and the alive files (how long each
+allocation ran), and prints the spend upper bound and `stop_at_utc`, the time the budget runway ends (or the deadline,
+if earlier). Exit 5 means a limit is reached now: the wrapper finalizes with that limit's outcome without training
+(or, with nothing committed yet, journals `limit` and exits 0). Otherwise it trains until `stop_at_utc` like a
+deadline. Every stop exits 0, the only code that ends a managed job without a restart whatever
+`max_restarts_on_errors` is. The bound counts waiting without a VM as free only with `--free-without-vm` and readable
+alive files; an allocation lost before its watchdog started is not seen, so the optional campaign guard stays the
+stricter outside count.
 
 One writer: a SkyPilot managed job runs one worker at a time, so no fencing, attempt records or pointer files are needed. Setups with several writers can still have a coordinator accept each commit and use the verifier's `--accepted-record` check ([verifier](verifier.md#optional-coordinator-acceptance-record-multi-writer-setups-only)). Keep provider, region/access plan, GPU count and backend fixed for a run; replacement selection is not permission to migrate scientific conditions.
 
