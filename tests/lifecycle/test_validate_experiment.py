@@ -310,6 +310,13 @@ class ContractTests(unittest.TestCase):
         self.assertTrue(any('notify.format' in x for x in validate(e,'launch')))
         e=copy.deepcopy(d); e['monitoring']['notify']['url']='https://ntfy.sh/secret'
         self.assertTrue(any('NOTIFY_URL secret' in x for x in validate(e,'launch')))
+    def test_fallback_without_the_guard_needs_no_timed_wait(self):
+        d=copy.deepcopy(self.ready); d['recovery'].update(allow_on_demand=True,on_demand_fallback={'approved':True},max_capacity_wait_minutes=60)
+        self.assertEqual(validate(d,'launch'),[])
+        d['monitoring']['guard']='external'
+        self.assertTrue(any('after_capacity_wait_minutes' in e for e in validate(d,'launch')))
+        d['recovery']['on_demand_fallback']['after_capacity_wait_minutes']=30
+        self.assertEqual(validate(d,'launch'),[])
     def test_watchdog_settings(self):
         d=copy.deepcopy(self.ready)
         d['watchdog']={'k':5,'limits':{'train':240,'eval':900,'save':600,'final':600,'startup':1800},'ceilings':{'final':7200},

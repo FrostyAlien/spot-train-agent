@@ -4,6 +4,9 @@
   render_job.py experiment.json --argv-json '[...]' [--variant V] [--secret NAME ...] > task.yaml
   render_job.py experiment.json --secret NAME ... --check-secret-file /abs/secrets.env
   render_job.py experiment.json --argv-json '[...]' --validate-with-skypilot      (start checks only)
+  [--spent-before USD]          primary/fallback: the upper bound of earlier jobs of the run (the worker's limits)
+  [--scheduling-timeout]        primary/fallback: add job.wait_for_scheduling_timeout (only where the chosen
+                                SkyPilot accepts it: the start checks' round trip decides)
 
 Variants: primary (the managed job), on-demand-fallback (the guard's pre-approved task), qualify (the real
 GPUs: fresh then resume, measurements, journal checked), rehearsal (optional CPU fallback: wiring only),
@@ -59,9 +62,13 @@ SHUTDOWN_RESERVE_HOURS = (60 + 5 * 60) / 3600     # the guard's default poll plu
 
 
 def secret_names(m, secrets=()):
-    """Every secret the launch must supply: the project's names plus, for a private registry, the three
-    SkyPilot registry-login variables (SkyPilot needs them together, all as secrets)."""
+    """Every secret the launch must supply: the project's names, NOTIFY_URL when the contract names a
+    notification channel (the worker sends notices itself), and for a private registry the three SkyPilot
+    registry-login variables (SkyPilot needs them together, all as secrets)."""
     names = list(secrets)
+    mon = m.get('monitoring') if isinstance(m.get('monitoring'), dict) else {}
+    if isinstance(mon.get('notify'), dict) and m.get('tier', 'standard') != 'minimal' and 'NOTIFY_URL' not in names:
+        names.append('NOTIFY_URL')
     if isinstance(m.get('image'), dict) and m['image'].get('registry_login') is True:
         names += [n for n in DOCKER_LOGIN if n not in names]
     if not (len(set(names)) == len(names) and all(isinstance(n, str) and SECRET_NAME.fullmatch(n) for n in names)):
@@ -150,7 +157,7 @@ def watchdog_env(m, qualify_seconds=None) -> dict:
 
 
 def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeout_minutes=20, helpers=None,
-           cpu_region=None, eval_scale=None):
+           cpu_region=None, eval_scale=None, spent_before=0.0, scheduling_timeout=False):
     """variant: primary (the managed job), on-demand-fallback (the guard's pre-approved task), a
     qualification run on a plain self-bounded cluster (qualify: the real GPUs, fresh then resume, a few
     steps each, measurements; rehearsal: the optional CPU fallback, the same image and buckets, wiring
@@ -158,7 +165,9 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
     against the bucket). Qualification writes under /checkpoints/qualify/<run>/<variant>-<tag>, never the
     run's prefix. secrets: names only, exported as SECRET_NAMES; values come at launch (--secret-file).
     helpers: local copies mounted at /opt/gpu-skills for the verify task, which runs without the image.
-    eval_scale (qualification): the full eval set over the subset's, passed to journal-check."""
+    eval_scale (qualification): the full eval set over the subset's, passed to journal-check.
+    spent_before (primary, fallback): the upper bound of earlier jobs of the run, for the worker's limits.
+    scheduling_timeout (primary, fallback): add SkyPilot's job.wait_for_scheduling_timeout (first start only)."""
     def require(condition, message):
         if not condition:
             raise ValueError(message)
@@ -284,11 +293,16 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
         require(rec.get('allow_region_change') is False, 'Region changes require a separately approved plan')
     require(variant in VARIANTS, 'variant must be one of ' + ', '.join(VARIANTS))
     fallback = rec.get('on_demand_fallback')
+    mon = m.get('monitoring') if isinstance(m.get('monitoring'), dict) else {}
+    guard = mon.get('guard', 'none')
+    require(guard in ('none', 'external'), 'monitoring.guard must be none or external')
     if rec.get('allow_on_demand') is True:
+        # Without the guard SkyPilot falls back itself (ordered resources): no timed wait to configure.
         require(purchase_model == 'spot' and isinstance(fallback, dict) and fallback.get('approved') is True
-                and type(fallback.get('after_capacity_wait_minutes')) in (int, float)
-                and fallback['after_capacity_wait_minutes'] > 0,
-                'allow_on_demand needs an approved recovery.on_demand_fallback on a spot run')
+                and (guard == 'none' or (type(fallback.get('after_capacity_wait_minutes')) in (int, float)
+                                         and fallback['after_capacity_wait_minutes'] > 0)),
+                'allow_on_demand needs an approved recovery.on_demand_fallback on a spot run '
+                '(with the guard: after_capacity_wait_minutes > 0)')
     else:
         require(rec.get('allow_on_demand') is False and fallback is None,
                 'On-demand fallback must be explicitly approved (allow_on_demand + on_demand_fallback)')
@@ -341,8 +355,12 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
         argv = ['python', '-c', 'raise SystemExit("Set the reviewed training argv and durable storage wiring before launch")']
     require(isinstance(argv, list) and argv and all(isinstance(x, str) and '\x00' not in x for x in argv), 'argv must be a nonempty JSON string array')
     use_spot = purchase_model == 'spot' and variant in ('primary', 'qualify')
-    recovery = ({'job_recovery': {'strategy': 'FAILOVER' if len(regions) == 1 else 'EAGER_NEXT_REGION',
-                                  'max_restarts_on_errors': app_restarts}} if managed else {})
+    # An approved fallback without the guard: SkyPilot's ordered resources, spot first. EAGER_NEXT_REGION
+    # relaunches from the whole list on every recovery, so spot is tried first again; FAILOVER would first
+    # retry what launched last and stay on-demand after a fallback.
+    ordered = variant == 'primary' and use_spot and rec.get('allow_on_demand') is True and guard == 'none'
+    strategy = 'EAGER_NEXT_REGION' if ordered or len(regions) > 1 else 'FAILOVER'
+    recovery = ({'job_recovery': {'strategy': strategy, 'max_restarts_on_errors': app_restarts}} if managed else {})
     # No `secrets:` section: a null-valued secret in a task file is a managed-secret reference that the
     # jobs controller cannot resolve without a secrets provider. Values come with --secret-file at launch.
     names = secret_names(m, secrets)
@@ -357,6 +375,22 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
             **({'CAMPAIGN_DEADLINE_UTC': deadline} if deadline and variant not in QUALIFY else {}),
             **({'PURCHASE_MODE': 'on-demand-fallback'} if variant == 'on-demand-fallback' else {}),
             **({'SECRET_NAMES': ','.join(names)} if names else {})}
+    if isinstance(mon.get('notify'), dict) and variant != 'verify':
+        envs['NOTIFY_FORMAT'] = str(mon['notify'].get('format') or 'text')
+    total, ceiling = budget.get('total_limit'), budget.get('ceiling_hourly_usd')
+    if tier == 'standard' and variant in ('primary', 'on-demand-fallback') and total is not None and ceiling:
+        # The run's limits, checked by the worker at every start (recover skill: checkpoint_marker.py limits).
+        require(type(spent_before) in (int, float) and math.isfinite(spent_before) and spent_before >= 0,
+                'spent_before must be a finite nonnegative amount')
+        no_progress = rec.get('max_attempts_without_progress', 10)
+        envs.update(CAMPAIGN_SUBMITTED_AT=str(int(time.time())), BUDGET_LIMIT_USD=str(total),
+                    BUDGET_RESERVED_USD=str(budget.get('controller_allowance') or 0),
+                    BUDGET_SPENT_BEFORE_USD=str(spent_before), CEILING_HOURLY_USD=str(ceiling),
+                    FREE_WITHOUT_VM='1' if budget.get('free_without_vm') is True else '0',
+                    STARTUP_ALLOWANCE_MINUTES=str(rec.get('startup_allowance_minutes', 10)),
+                    MAX_ATTEMPTS_WITHOUT_PROGRESS=str(no_progress))
+        if rec.get('max_attempts') is not None:
+            envs['MAX_ATTEMPTS'] = str(rec['max_attempts'] + (rec.get('planned_drills') or 0))
     watch_env = watchdog_env(m, timeout_minutes * 60 if variant in QUALIFY else None) if variant != 'verify' else {}
     watch = f'python3 {WATCHER} watch -- ' if watch_env else ''      # wraps the launcher (observe skill)
     if watch_env:
@@ -371,12 +405,17 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
     require(isinstance(disk, dict), 'disk must be an object')
     if 'size_gb' in disk:
         require(type(disk['size_gb']) is int and 20 <= disk['size_gb'] <= 65536, 'disk.size_gb must be an integer (GB)')
+    if ordered:
+        placement = {'ordered': [{'infra': f'{provider}/{r}', 'use_spot': spot} for spot in (True, False) for r in regions]}
+    else:
+        placement = ({'infra': f'{provider}/{region}'} if len(regions) == 1 else
+                     {'any_of': [{'infra': f'{provider}/{r}'} for r in regions]})
+        placement['use_spot'] = use_spot
     resources = {**({'instance_type': instance_type} if instance_type is not None else {}),
                  **({'disk_size': disk['size_gb']} if 'size_gb' in disk else {}),
-                 **({'infra': f'{provider}/{region}'} if len(regions) == 1 else
-                    {'any_of': [{'infra': f'{provider}/{r}'} for r in regions]}),
+                 **placement,
                  'accelerators': f"{gpu['model']}:{gpu['count']}",
-                 'image_id': 'docker:' + ref, 'use_spot': use_spot,
+                 'image_id': 'docker:' + ref,
                  # Always explicit when managed: recent SkyPilot defaults to EAGER_NEXT_REGION.
                  **recovery, **autostop}
     if variant in QUALIFY:
@@ -462,8 +501,14 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
                               'autostop': {'idle_minutes': 10, 'down': True}},
                 'file_mounts': {'/checkpoints': mount, **(helpers or {})},
                 'envs': {'EXPERIMENT_RUN_ID': run, 'CHECKPOINT_DIR': ckdir}, 'run': script + '\n'}
+    job = {}
+    if scheduling_timeout and managed and variant in ('primary', 'on-demand-fallback'):
+        wait = rec.get('max_capacity_wait_minutes')
+        require(type(wait) in (int, float) and wait > 0, 'scheduling_timeout needs recovery.max_capacity_wait_minutes')
+        # SkyPilot cancels a job that has not started within this time (first start only, never a recovery).
+        job = {'job': {'wait_for_scheduling_timeout': f"{math.ceil(rec.get('startup_allowance_minutes', 10) + wait)}m"}}
     task = {'name': run if variant == 'primary' else run + ('-od' if variant == 'on-demand-fallback' else '-' + variant),
-            'num_nodes': 1, 'api_server_access': False, 'resources': resources,
+            'num_nodes': 1, 'api_server_access': False, 'resources': resources, **job,
             **({'file_mounts': mounts} if mounts else {}), 'envs': envs,
             # No `exec`, no `-e`, no pipefail: SkyPilot appends its cached-mount upload flush to this script, and
             # it must run after training ends (success or failure) so the last checkpoints and FINAL.json reach
@@ -532,6 +577,10 @@ def main():
                    'does not evaluate)')
     p.add_argument('--cpu-region', help='rehearsal/verify: a region of the provider with CPU-only quota '
                                         '(for example the control host region)')
+    p.add_argument('--spent-before', type=float, default=0.0,
+                   help="primary/fallback: upper bound of earlier jobs of this run (the worker's limits)")
+    p.add_argument('--scheduling-timeout', action='store_true',
+                   help="primary/fallback: add SkyPilot's job.wait_for_scheduling_timeout (if the chosen version accepts it)")
     p.add_argument('--check-secret-file', metavar='PATH',
                    help='check the dotenv file for `sky jobs launch --secret-file` instead of rendering')
     p.add_argument('--validate-with-skypilot', action='store_true',
@@ -547,7 +596,7 @@ def main():
         argv = json.loads(args.argv_json) if args.argv_json else None
         helpers = default_helpers() if args.variant == 'verify' else None
         result = render(m, argv, args.variant, args.secret, args.qualify_tag, args.timeout_minutes, helpers,
-                        args.cpu_region, args.eval_scale)
+                        args.cpu_region, args.eval_scale, args.spent_before, args.scheduling_timeout)
         if args.validate_with_skypilot:
             # SkyPilot may print to stdout while it loads (a catalog refresh writes progress records):
             # keep stdout for the rendered task only.

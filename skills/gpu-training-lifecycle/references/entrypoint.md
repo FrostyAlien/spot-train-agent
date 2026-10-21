@@ -128,8 +128,9 @@ wrapper(argv):                                    # one process per node, the ta
         journal(run, attempt, "preflight", report + identity)   # image digest, dataset version, world size
     if RUN_MODE == train:                         # the run's limits; no outside guard is needed
         limits = checkpoint_marker.limits(run, the rendered budget values above)   # as `checkpoint_marker.py limits`
+        journal(run, attempt, "limits", **limits)  # a relaunch and the finish read the spend bound here
         if limits.limit:                          # reached now: stop without training, exit 0 (never a restart)
-            journal(run, attempt, "limit", **limits)
+            journal(run, attempt, "limit", reached=limits.limit)
             try: checkpoint_marker.finalize(run, identity, outcome=OUTCOME[limits.limit])   # budget_stopped, ...
             except Blocked: pass                  # nothing committed yet: the journal says why
             notify(f"stopped: {limits.limit} (spend <= {limits.spend_upper_usd} USD, an upper bound)", "stopped"); exit 0

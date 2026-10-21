@@ -114,14 +114,17 @@ def validate(d, phase='plan', locked=None):
     if field('recovery.allow_provider_change') is not False: err('this suite forbids provider change within a run')
     fallback=d.get('recovery',{}).get('on_demand_fallback') if isinstance(d.get('recovery'),dict) else None
     if field('recovery.allow_on_demand') is True:
-        # Never silent: only a user-approved, guard-executed fallback within the same provider.
+        # Never silent: only a user-approved fallback within the same provider. Without the guard SkyPilot
+        # falls back itself (ordered resources, spot first); with the guard it waits after_capacity_wait_minutes.
         if d.get('purchase_model') not in (None,'spot'): err('on-demand fallback applies only to spot runs')
-        if not (isinstance(fallback,dict) and fallback.get('approved') is True
-                and isinstance(fallback.get('after_capacity_wait_minutes'),(int,float))
-                and not isinstance(fallback.get('after_capacity_wait_minutes'),bool)
-                and fallback['after_capacity_wait_minutes']>0):
-            err('allow_on_demand requires recovery.on_demand_fallback {approved: true, after_capacity_wait_minutes > 0}')
-        else:
+        mon=d.get('monitoring') if isinstance(d.get('monitoring'),dict) else {}
+        timed=mon.get('guard','none')=='external'
+        wait_ok=(isinstance(fallback,dict) and isinstance(fallback.get('after_capacity_wait_minutes'),(int,float))
+                 and not isinstance(fallback.get('after_capacity_wait_minutes'),bool) and fallback['after_capacity_wait_minutes']>0)
+        if not (isinstance(fallback,dict) and fallback.get('approved') is True and (wait_ok or not timed)):
+            err('allow_on_demand requires recovery.on_demand_fallback {approved: true} '
+                '(with monitoring.guard external also after_capacity_wait_minutes > 0)')
+        elif wait_ok:
             wait=d['recovery'].get('max_capacity_wait_minutes')
             if isinstance(wait,(int,float)) and not isinstance(wait,bool) and fallback['after_capacity_wait_minutes']>=wait:
                 err('on_demand_fallback.after_capacity_wait_minutes must be less than max_capacity_wait_minutes')
