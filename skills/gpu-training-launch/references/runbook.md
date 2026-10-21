@@ -47,7 +47,7 @@ flags status -u; flags "storage ls"; flags check; flags "api info" -o; flags "ap
 ```
 Check: no `MISSING` line; otherwise adapt that command from this version's `--help` before going on. Then the
 renderer's round trip with the installed SkyPilot (`$P`) for the primary task and the
-qualification task, then a dry run of the qualification task through the control host's API server (it proves the server answers, is not stale and
+qualification task, then a dry run of the qualification task through the API server (it proves the server answers, is not stale and
 finds the resources; no VM is created; a dry run does not touch file mounts on the server, so the
 controller runbook's step 5 checks the server's view of them):
 ```bash
@@ -188,7 +188,8 @@ control host) to `budget.controller_allowance` and note it in `qualification.jso
 carried-over spend and attempts.
 Every spend figure here and in later reports is an upper bound at the on-demand price; the real spot cost
 comes from the provider's bill. Approval at the interaction level: SKILL step 8. The guard's notify command
-receives one JSON message on stdin (for example `["curl","-sS","-d","@-","https://ntfy.sh/<private topic>"]`).
+receives one JSON message on stdin; it reads the URL from the secrets file, so the URL never sits in its argv or
+the guard's files (for example `["bash","-c","curl -sS -d @- \"$(sed -n s/^NOTIFY_URL=//p /abs/<W>/secrets.env)\""]`).
 
 ## 4. Submit (Standard tier), then the optional guard
 A new run revision (new `run_id`) gets a new `$W`; the earlier run's spend is carried in `budget.controller_allowance`.
@@ -238,8 +239,8 @@ brings back a clean process. Without systemd, run the loop through the controlle
 *(offline only)* With `budget.free_without_vm` (the provider bills compute only while a VM exists), `--vm-count-cmd` lets the
 guard see that a waiting job has no VM, so that waiting is not charged; without it only PENDING time is free.
 
-*(offline only)* Approved on-demand fallback: render it once with `--variant on-demand-fallback` to an absolute path and
-add `--fallback-task <path> --secrets-cmd '["bash","/abs/secrets-env.sh"]'` to `--init-config`; the guard
+*(offline only)* Approved on-demand fallback: render it once with `--variant on-demand-fallback --campaign-start "$(cat $W/campaign-start)"` (like the
+primary task) to an absolute path and add `--fallback-task <path> --secrets-cmd '["bash","/abs/secrets-env.sh"]'` to `--init-config`; the guard
 re-reads the secrets when it fires.
 
 Relaunch after a failure: the earlier job must be terminal (with the guard, its ledger done:

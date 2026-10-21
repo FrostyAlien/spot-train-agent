@@ -1,6 +1,6 @@
 # Finish runbook
 
-On the control host in bash after the run's last job ended, with the pinned client's `sky` (launch runbook),
+On the control host (or, without one, the operator's machine) in bash after the run's last job ended, with the pinned client's `sky` (launch runbook),
 `R=<launch-skill>/scripts/render_job.py`, `G=<observe-skill>/scripts/campaign_guard.py`, `P=~/sky-venv/bin/python`
 (the guard imports SkyPilot), `ST=<controller-skill>/scripts/stage.sh`, `W=~/campaign/<run_id>`
 (the run's campaign directory, launch runbook). Nothing here deletes
@@ -83,7 +83,7 @@ directories, registry images, the control host) with its monthly cost; the user 
 Pruning: the verify task's `FINISH-PRUNE {...}` line lists the `prunable` checkpoint directories:
 everything older than the newest three complete checkpoints (complete: the marker and every manifest file
 present at its listed size), never FINAL.json's checkpoint and never anything newer. After the user
-approves (automatic level: the cleanup policy), delete them from the control host, never from a worker:
+approves (automatic level: the cleanup policy), delete them from the control host or the operator's machine, never from a worker:
 ```bash
 for d in <prunable dirs>; do bash -c 'source "$1"; hook_storage_delete "$2"' _ /abs/provider-hooks.sh "<checkpoint uri>/$d/"; done
 ```

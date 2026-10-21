@@ -130,7 +130,7 @@ def validate(d, phase='plan', locked=None):
                 err('on_demand_fallback.after_capacity_wait_minutes must be less than max_capacity_wait_minutes')
     elif fallback is not None: err('recovery.on_demand_fallback requires allow_on_demand=true')
     if 'max_capacity_wait_minutes' in d['recovery']: number('recovery.max_capacity_wait_minutes',positive=True)
-    if 'startup_allowance_minutes' in d['recovery']: number('recovery.startup_allowance_minutes')
+    if 'startup_allowance_minutes' in d['recovery']: number('recovery.startup_allowance_minutes')   # null is not a default: omit it
     drills=d['recovery'].get('planned_drills',0)
     if isinstance(drills,bool) or not isinstance(drills,int) or drills<0: err('recovery.planned_drills must be a nonnegative integer (drills consume attempts)')
     if 'registry_login' in d.get('image',{}) and not isinstance(d['image']['registry_login'],bool): err('image.registry_login must be true or false')
@@ -140,7 +140,8 @@ def validate(d, phase='plan', locked=None):
     if isinstance(restarts,bool) or not isinstance(restarts,int) or restarts<0: err('recovery.max_app_restarts must be a nonnegative integer')
     if attempts is not None and (isinstance(attempts,bool) or not isinstance(attempts,int) or attempts < 0): err('recovery.max_attempts must be a nonnegative integer or null (no absolute cap)')
     stalled=d['recovery'].get('max_attempts_without_progress')
-    if stalled is not None and (type(stalled) is not int or stalled<1): err('recovery.max_attempts_without_progress must be a positive integer')
+    if 'max_attempts_without_progress' in d['recovery'] and (type(stalled) is not int or stalled<1):
+        err('recovery.max_attempts_without_progress must be a positive integer (omit it for the default 10)')
     if 'free_without_vm' in d['budget'] and not isinstance(d['budget']['free_without_vm'],bool): err('budget.free_without_vm must be true or false (from the provider research record)')
     cap=d['budget'].get('spot_price_cap')
     if cap is not None:

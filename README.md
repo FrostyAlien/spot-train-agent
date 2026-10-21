@@ -153,6 +153,7 @@ Next:
 - [ ] Live test of reusing your own image and of the local test on your own GPU
 - [ ] Live test with 8 GPUs on one node
 - [ ] Spot price cap through a provider pricing policy (Nebius), live test
+- [ ] Live test of a worker limit stop and its relaunch, and of the ordered on-demand fallback
 - [ ] Live test of the guard's on-demand fallback and cancel paths
 - [ ] Control-plane backup and restore
 

@@ -5,7 +5,7 @@ Nebius, not a maintained fact sheet. Every row has a check date; re-check each o
 the live account, and record the result in the project's provider record, as for any provider.
 
 ## Managed SkyPilot API server
-Checked 2026-10-08 (Nebius docs and tutorials; live checks pending).
+Checked 2026-10-08 (Nebius docs and tutorials); used live 2026-10-21 (login, `sky api info`, CPU and GPU launches).
 - Nebius offers a hosted SkyPilot API server, one per account, in Preview: no SLA; the terms say free during
   Preview while the tutorials list its VM as billed (check the billing page). Use it as `controller.mode:
   provider-managed` (controller runbook: existing server).

@@ -136,7 +136,8 @@ wrapper(argv):                                    # one process per node, the ta
         journal(run, attempt, "preflight", report + identity)   # the probe JSON as printed (GPU name and driver are per device, in report.devices[]); image digest, dataset version, world size
     if RUN_MODE == train and FINAL.json exists under run:   # completed or stopped at the deadline: final
         print("FINAL.json exists (outcome ...): nothing to train"); exit 0
-    if RUN_MODE == train:                         # the run's limits; no outside guard is needed
+    limits = none
+    if RUN_MODE == train and BUDGET_LIMIT_USD is set:   # the run's limits (Standard tier); no outside guard is needed
         limits = `checkpoint_marker.py limits $CHECKPOINT_DIR --from-env`   # exit 0: keep going, 5: a limit now
         if its exit code is neither 0 nor 5: print("blocked: limits unreadable ..."); exit 3   # never train unbounded
         journal(run, attempt, "limits", **limits)  # the finish and the status checks read the spend bound here
@@ -146,6 +147,8 @@ wrapper(argv):                                    # one process per node, the ta
             notify(f"stopped: {limits.limit} (spend <= {limits.spend_upper_usd} USD, an upper bound)", "stopped"); exit 0
             # budget, no_progress, attempts write no FINAL.json: a relaunch with a raised limit resumes this run
         env.CAMPAIGN_STOP_UTC, env.CAMPAIGN_STOP_BY = limits.stop_at_utc, limits.stop_by   # budget or deadline
+    elif RUN_MODE == train and CAMPAIGN_DEADLINE_UTC is set:   # Minimal tier: the deadline only
+        env.CAMPAIGN_STOP_UTC, env.CAMPAIGN_STOP_BY = CAMPAIGN_DEADLINE_UTC, "deadline"
     if RUN_MODE == train and PRICE_CAP_ID is set:  # optional (offline only): each new VM caps its own spot price
         cap = hook_price_cap(PRICE_CAP_ID)        # provider hooks; needs the provider CLI and credentials in the image
         if cap failed: journal(run, attempt, "price_cap", state="failed"); notify("spot price cap failed: running uncapped", "price_cap")
@@ -157,7 +160,7 @@ wrapper(argv):                                    # one process per node, the ta
     journal(run, attempt, "selection", action=selection.action, step=selection.global_step)
     if RUN_MODE == train:
         notify(f"started fresh" if selection.action == "fresh" else f"resumed from step {selection.global_step}"
-               + f", allocation {limits.allocations}, spend <= {limits.spend_upper_usd} USD", "started")
+               + (f", allocation {limits.allocations}, spend <= {limits.spend_upper_usd} USD" if limits else ""), "started")
     env.CHECKPOINT_ATTEMPT, env.CHECKPOINT_SELECTION = attempt, json(selection)   # handed to every rank
     exec the launcher with the training argv      # exactly one (or the training itself with one process per node);
                                                   # exec, so the watchdog's TERM reaches it directly
@@ -174,18 +177,20 @@ main():                                           # every rank, started by the l
         train_one_update(state)
         progress_watch.tick("train", count=step, step=step, rank=rank)
         stop_now = RUN_MODE != train and selection.action == "fresh" and commits_this_start == 2
-        past_deadline = RUN_MODE == train and now >= CAMPAIGN_STOP_UTC   # budget runway or deadline
+        past_deadline = RUN_MODE == train and CAMPAIGN_STOP_UTC is set and now >= CAMPAIGN_STOP_UTC   # budget runway or deadline
         if checkpoint_due or step == last or stop_now or past_deadline:   # the last step is always saved
             if free_disk(home) < 1.1 * last_checkpoint_size + 10 GB:   # the mount cache lives on the boot disk
-                rank0: journal(run, attempt, "save_skipped", reason="disk"); continue
-            progress_watch.tick("save", step=step, rank=rank)
-            all ranks: framework.save(step_dir(run, step, attempt) / "payload")   # create parents first
-            barrier()                                                            # every file closed
-            rank0: checkpoint_marker.commit(step_dir, fields, files)    # prints CHECKPOINT_COMMITTED {...}
-            rank0: journal(run, attempt, "commit", step=step, save_seconds=..., checkpoint_gb=...)
-            rank0, first commit of this start: notify(f"checkpoint at step {step} committed", "commit")
-            rank0: copy outputs the user needs at finish that changed (best model) to run/final/...
-            progress_watch.tick("train", count=step, step=step, rank=rank)      # the save is done
+                rank0: journal(run, attempt, "save_skipped", reason="disk")
+                if not past_deadline: continue        # at a stop, stop anyway: the newest commit is the result
+            else:
+                progress_watch.tick("save", step=step, rank=rank)
+                all ranks: framework.save(step_dir(run, step, attempt) / "payload")   # create parents first
+                barrier()                                                            # every file closed
+                rank0: checkpoint_marker.commit(step_dir, fields, files)    # prints CHECKPOINT_COMMITTED {...}
+                rank0: journal(run, attempt, "commit", step=step, save_seconds=..., checkpoint_gb=...)
+                rank0, first commit of this start: notify(f"checkpoint at step {step} committed", "commit")
+                rank0: copy outputs the user needs at finish that changed (best model) to run/final/...
+                progress_watch.tick("train", count=step, step=step, rank=rank)      # the save is done
         if evaluation_due:                                      # all ranks evaluate (none: see Notes)
             metrics = evaluate(state, on_batch=lambda i: progress_watch.tick("eval", count=i, step=step, rank=rank))
             metrics += {"train_loss": recent train loss}

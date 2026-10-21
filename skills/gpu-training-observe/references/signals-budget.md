@@ -19,7 +19,7 @@ Implement these checks in the deployed campaign guard (or a versioned project eq
 On cancellation verify terminal state. Cleanup inventory: `gpu-training-finish` → `references/closure.md#exact-cleanup-inventory`.
 
 ## Spot-only recovery
-For a spot run, verify actual purchase mode as well as provider/region on every replacement. No automatic on-demand fallback, except the guard-executed fallback the user approved in advance (`recovery.on_demand_fallback`). Track durable total attempts and capacity-wait elapsed time against max_capacity_wait_minutes; unavailable capacity triggers bounded waiting and then stop/report. SkyPilot application-error restart limits are not total infrastructure recovery limits. Do not broaden resource candidates to make the dashboard green.
+For a spot run, verify actual purchase mode as well as provider/region on every replacement. No automatic on-demand fallback, except the one the user approved in advance (`recovery.on_demand_fallback`, rendered as `gpu-training-launch` → `references/launch-gates.md#recovery-semantics` describes). Track durable total attempts and capacity-wait elapsed time against max_capacity_wait_minutes; unavailable capacity triggers bounded waiting and then stop/report. SkyPilot application-error restart limits are not total infrastructure recovery limits. Do not broaden resource candidates to make the dashboard green.
 
 ## Observation records
 The guard ledger is the observation record (status history with timestamps, attempts, spend bound, actions); the job logs' `CHECKPOINT_JOURNAL`/`CHECKPOINT_COMMITTED` lines and the bucket journal carry progress; the finish runbook collects both with provider resource IDs.

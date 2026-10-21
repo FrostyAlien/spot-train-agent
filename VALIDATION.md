@@ -47,7 +47,7 @@ All on one provider (Nebius) with L40S GPUs and spot capacity. Each found gaps t
 See the roadmap in the README.
 
 
-- v0.10.0 paths a run without failures does not reach: a worker limit stop and its relaunch, the ordered on-demand fallback, a preemption under a provider-managed server, the spot price cap (Nebius offers pricing policies only on some GPU platforms; L40S was refused), the user-stop finalize commands
+- v0.10.0 paths a run without failures does not reach: a worker limit stop and its relaunch, the ordered on-demand fallback, a preemption under a provider-managed server, the spot price cap (Nebius offers pricing policies only on some GPU platforms; L40S was refused), the user-stop finalize commands, the notification check command
 - Guard cancel, blind and on-demand fallback paths; the worker deadline stop
 - 8 GPUs on one node; multiple nodes (the goal, not supported yet); any provider other than Nebius; the Minimal tier
 - Control-plane state backup and restore, duplicate-controller fencing

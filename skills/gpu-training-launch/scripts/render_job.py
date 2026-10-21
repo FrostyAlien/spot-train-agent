@@ -385,11 +385,14 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
         start = int(time.time()) if campaign_start is None else campaign_start
         require(type(start) in (int, float) and math.isfinite(start) and 0 < start <= time.time() + 60,
                 'campaign_start must be the Unix seconds of the run\'s first submission')
-        no_progress = rec.get('max_attempts_without_progress', 10)
+        no_progress = rec.get('max_attempts_without_progress')
+        no_progress = 10 if no_progress is None else no_progress
+        startup = rec.get('startup_allowance_minutes')
+        startup = 10 if startup is None else startup
         envs.update(CAMPAIGN_SUBMITTED_AT=str(int(start)), BUDGET_LIMIT_USD=str(total),
                     BUDGET_RESERVED_USD=str(budget.get('controller_allowance') or 0), CEILING_HOURLY_USD=str(ceiling),
                     FREE_WITHOUT_VM='1' if budget.get('free_without_vm') is True else '0',
-                    STARTUP_ALLOWANCE_MINUTES=str(rec.get('startup_allowance_minutes', 10)),
+                    STARTUP_ALLOWANCE_MINUTES=str(startup),
                     MAX_ATTEMPTS_WITHOUT_PROGRESS=str(no_progress))
         if rec.get('max_attempts') is not None:
             envs['MAX_ATTEMPTS'] = str(rec['max_attempts'] + (rec.get('planned_drills') or 0))

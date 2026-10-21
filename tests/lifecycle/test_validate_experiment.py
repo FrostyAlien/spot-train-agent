@@ -255,6 +255,10 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(validate(d,'launch'),[])                    # no absolute cap; no-progress limit applies
         d['recovery']['max_attempts_without_progress']=0
         self.assertTrue(validate(d,'launch'))
+        d['recovery']['max_attempts_without_progress']=None   # null is not the default: the worker could not read it
+        self.assertTrue(any('max_attempts_without_progress' in e for e in validate(d,'launch')))
+        d=copy.deepcopy(self.ready); d['recovery']['startup_allowance_minutes']=None
+        self.assertTrue(any('startup_allowance_minutes' in e for e in validate(d,'launch')))
     def test_runway_must_cover_planned_job_time(self):
         d=copy.deepcopy(self.ready); d['budget'].update(total_limit=10,controller_allowance=0.5,ceiling_hourly_usd=4.57,planned_job_hours=2.5)
         self.assertTrue(any('budget runway' in e for e in validate(d,'launch')))

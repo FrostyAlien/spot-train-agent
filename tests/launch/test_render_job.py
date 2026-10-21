@@ -217,6 +217,9 @@ class ExtensionTests(unittest.TestCase):
         self.assertNotIn('BUDGET_LIMIT_USD', q['envs'])
         self.assertNotIn('BUDGET_LIMIT_USD', render(fixture())['envs'])      # unknown budget: planning only
         with self.assertRaises(ValueError): render(self.budgeted(), campaign_start=-1)
+        m = self.budgeted(); m['recovery'].update(max_attempts_without_progress=None, startup_allowance_minutes=None)
+        e = render(m)['envs']                                          # null renders the defaults, never 'None'
+        self.assertEqual((e['MAX_ATTEMPTS_WITHOUT_PROGRESS'], e['STARTUP_ALLOWANCE_MINUTES']), ('10', '10'))
     def test_notification_channel_is_a_required_secret_and_a_format(self):
         m = fixture(); m['monitoring'] = {'notify': {'channel': 'ntfy', 'format': 'slack'}}
         j = render(m, secrets=['WANDB_API_KEY'])
