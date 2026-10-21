@@ -2,7 +2,7 @@
 
 What has been tested, and how. Runbook steps marked *(offline only)* have not run in a live test. After a live run, remove the marker from the steps that ran.
 
-## Offline tests (v0.9.4, macOS / Python 3.13)
+## Offline tests (v0.9.5, macOS / Python 3.13)
 
 359 tests pass:
 
