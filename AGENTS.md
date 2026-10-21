@@ -68,4 +68,4 @@ These come from the maintainer's decisions during live tests; follow them unless
 
 - Build each release on its own branch, `release/vX.Y.Z`, in a separate worktree (the shared checkout stays on `main`). Merge it into `main` through a pull request only after the tests, the review and the live test pass (a merge commit, no squash); tag on `main`. Live-test fixes land on the release branch first.
 - Each release's scope goes in the release notes on the tag (the GitHub release text), written for users: what changed and why, without links to private records.
-- Research notes, reviews, benchmarks and live-test logs stay out of this repository. `.gitignore` lists the maintainer's private files that sit beside the tracked ones; never force-add them.
+- Research notes, reviews, benchmarks and live-test logs stay out of this repository. The maintainer keeps them in the gitignored `dev/` folder; never force-add it, and never run `git clean -x` or `-X`, which deletes it.
