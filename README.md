@@ -4,7 +4,7 @@ Let your coding agent run your model training on cheap spot (preemptible) GPU in
 
 I built this to spend less on renting GPUs for my own research: spot instances are much cheaper, but they get preempted, and a run needs watching. These skills let my agent handle both, so I can train on spot capacity and check in only when there is something to decide. If you rent GPUs for research training and want the same, give it a try.
 
-Version 0.9.5 • [MIT](LICENSE) • Works with Claude Code, Codex and other hosts that read `SKILL.md` skills
+Version 0.10.0 • [MIT](LICENSE) • Works with Claude Code, Codex and other hosts that read `SKILL.md` skills
 
 ## Install
 
@@ -57,14 +57,14 @@ In Claude Code, `/spot-trainer:start` does the same and continues a run that is 
 The agent reads your repository and asks its intake questions once: budget, GPU type and count, provider, where the data is, how you want to be notified and how much it may do without asking. Then it works through the run:
 
 1. **Choose:** compares current GPU offers by total cost of useful training, spot or on-demand, then keeps that provider for the whole run.
-2. **Prepare:** a small control host, the dataset in the provider's storage and the training image. If you don't have a working image, the agent writes the Dockerfile and entrypoint around your code, builds it (on the control host, or a short-lived CPU VM when you use an existing SkyPilot server, or on your own Linux machine or CI) and checks it; if you have one, it checks it and adds only what is missing.
+2. **Prepare:** a SkyPilot API server (your existing one, a provider-managed one, or a small control host), the dataset in the provider's storage and the training image. If you don't have a working image, the agent writes the Dockerfile and entrypoint around your code, builds it (on the control host, or a short-lived CPU VM when you use an existing SkyPilot server, or on your own Linux machine or CI) and checks it; if you have one, it checks it and adds only what is missing.
 3. **Test:** one short run that starts fresh, saves and resumes, measuring startup time and memory. It runs first on your own GPU if you have one and want to, then once on the rented GPUs before the real run.
-4. **Launch:** submits the job with a guard that enforces the approved budget, deadline and attempt limits.
+4. **Launch:** submits the job; the training container itself enforces the approved budget, deadline and attempt limits.
 5. **Monitor:** notifications for progress milestones, preemptions, recoveries and stalls; the agent reads the metrics at planned evaluations, judges whether training is on track and reports to you.
 6. **Recover:** a preempted worker is replaced on the same provider and resumes from the newest checkpoint that verifies. A run that stops making progress is stopped instead of burning budget.
 7. **Finish:** verifies the final checkpoint and outputs, reconciles cost, and lists and removes exactly what the run created.
 
-You pick how often the agent stops for approval: `automatic` (approve the plan once), `gated` (the default: approve where money is committed or something is deleted) or `steps` (approve every stage). No chat session has to stay open while training runs; the guard keeps watching and the agent comes back when there is something to judge.
+You pick how often the agent stops for approval: `automatic` (approve the plan once), `gated` (the default: approve where money is committed or something is deleted) or `steps` (approve every stage). No chat session has to stay open while training runs; the run watches itself and the agent comes back when there is something to judge.
 
 Works with one node of up to eight GPUs, any ML framework (PyTorch, Hugging Face, JAX, Lightning, ...) and datasets up to TB scale. Multi-node is on the [roadmap](#roadmap).
 
@@ -76,10 +76,10 @@ Works with one node of up to eight GPUs, any ML framework (PyTorch, Hugging Face
 |---|---|
 | `gpu-training-lifecycle` | Plan an experiment, or continue one, across all stages |
 | `gpu-rental-select` | Compare current GPU offers and total cost, spot or on-demand |
-| `gpu-training-controller` | Set up or check the control host and the guard |
+| `gpu-training-controller` | Choose and connect the SkyPilot API server: your control host, an existing or provider-managed one |
 | `gpu-training-image` | Build and check the training image |
 | `gpu-training-data` | Put the dataset in the provider's storage and read it during training |
-| `gpu-training-launch` | Run the qualification task and launch the job with its guard |
+| `gpu-training-launch` | Run the qualification task and launch the job with its limits |
 | `gpu-training-observe` | Check how a run is going: progress, spend, preemptions, stalls |
 | `gpu-training-recover` | Wire checkpoint resume into training code, or diagnose a failed resume |
 | `gpu-training-finish` | Verify outputs, reconcile cost and clean up exactly what the run created |
@@ -88,7 +88,7 @@ Works with one node of up to eight GPUs, any ML framework (PyTorch, Hugging Face
 
 - **The provider stays fixed once chosen.** Recovery stays on the chosen provider and purchase mode. Spot is the main way to save, not a requirement; an on-demand fallback runs only if you approved it in advance.
 - **Checkpoints you can trust after a preemption:** framework-native files in a bucket of the GPU provider, plus a `COMMITTED.json` marker written last after the checkpoint verifies. Restore picks the newest committed checkpoint that verifies and fails closed on doubt; it never silently starts over after known progress.
-- **Code only where it runs unattended or checks deterministically** (the guard, the stall watchdog, the checkpoint verifier). Everything else is a runbook of CLI commands with a check after each step, built on [SkyPilot](https://github.com/skypilot-org/skypilot) managed jobs and Docker, with the SkyPilot version chosen at the start.
+- **Code only where it runs unattended or checks deterministically** (the run's limits, the stall watchdog, the checkpoint verifier, the optional guard). Everything else is a runbook of CLI commands with a check after each step, built on [SkyPilot](https://github.com/skypilot-org/skypilot) managed jobs and Docker, with the SkyPilot version chosen at the start.
 - **No vendor tables.** The skills ship no GPU tables or provider facts. The agent researches the chosen provider when you pick it and records dated findings in your project.
 
 SkyPilot's official `skypilot` skill is required: these skills hand SkyPilot CLI and YAML details to it ([notes](OFFICIAL_SKYPILOT.md)).
@@ -100,13 +100,13 @@ SkyPilot's official `skypilot` skill is required: these skills hand SkyPilot CLI
 ```mermaid
 flowchart TB
   intake["Intake<br/>budget, GPUs, provider, data"] --> choose["Choose<br/>compare offers, lock provider"]
-  choose --> ctrl["Control host<br/>SkyPilot API server + guard"]
+  choose --> ctrl["SkyPilot API server<br/>existing or control host"]
   ctrl --> image["Training image<br/>reuse yours or build it"]
   ctrl --> data["Dataset in<br/>provider storage"]
   image --> qualify["Test: fresh start,<br/>save, resume"]
   data --> qualify
   qualify --> approve{"You approve<br/>the main run"}
-  approve --> launch["Launch<br/>with the guard"]
+  approve --> launch["Launch<br/>with the run's limits"]
   launch --> loop["Train, monitor,<br/>recover"]
   loop --> finish["Finish<br/>verify, cost, cleanup"]
 ```
@@ -120,16 +120,15 @@ flowchart LR
   run["Training on<br/>a spot VM"] -->|saves| ckpt[("Verified checkpoint<br/>in the provider's bucket")]
   run -->|preempted| sky["SkyPilot managed job<br/>gets a new spot VM"]
   sky -->|restore newest<br/>verified checkpoint| run
-  guard["Guard on the<br/>control host"] -.->|watches| run
-  guard -->|limit reached| stop["Cancel the run"]
-  guard -->|milestones, recoveries,<br/>stalls, spend| agent["You and<br/>your agent"]
+  run -->|budget, deadline or<br/>no progress reached| stop["Stops itself,<br/>exit 0"]
+  run -->|started, resumed, evaluations,<br/>stalls, stop| agent["You and<br/>your agent"]
   agent --> judge{"On track at the<br/>planned evaluation?"}
   judge -->|yes| run
   judge -->|no| report["Agent reports<br/>and asks you"]
 ```
 
 - **Recovery needs no agent online.** SkyPilot replaces a preempted VM on the same provider, and the container restores the newest checkpoint that verifies.
-- **The guard** on the control host enforces the approved budget, deadline and attempt limits, and notifies you of milestones, recoveries, stalls and spend. Inside the VM, a stall watchdog stops a run that hangs.
+- **The run guards itself.** At every start the training container checks the approved budget, deadline and attempts, stops cleanly when one is reached, and notifies you when it starts, resumes, evaluates, stalls or stops. Inside the VM, a stall watchdog stops a run that hangs. Nothing has to stay online next to the job, so an existing SkyPilot server (a team's, a provider-managed one, or a local one) is enough; an optional outside guard adds a limit on waiting for capacity after a preemption.
 - **The agent** wakes on notifications and at planned evaluations, reads the metrics, judges whether training is on track and reports to you. It never changes code on its own.
 
 ## Roadmap
@@ -140,7 +139,8 @@ Works now:
 - [x] One node with 1-8 GPUs, any ML framework
 - [x] Build and test the training image with you
 - [x] Recover from spot preemption: replacement on the same provider, resume from the newest verified checkpoint
-- [x] Guard with budget, deadline, attempt and capacity-wait limits, and notifications
+- [x] Budget, deadline and attempt limits enforced by the run itself, and notifications from the worker
+- [x] Runs on your own control host, or on an existing, provider-managed or local SkyPilot server (live-tested on Nebius's managed server)
 - [x] Stall watchdog that stops a hung run instead of letting it bill
 - [x] Agent check-ins at planned evaluations: progress, spend and training quality
 - [x] TB-scale datasets in the provider's storage, or read from Hugging Face at a pinned revision
@@ -152,7 +152,8 @@ Next:
 - [ ] Multi-node training
 - [ ] Live test of reusing your own image and of the local test on your own GPU
 - [ ] Live test with 8 GPUs on one node
-- [ ] Run on an existing SkyPilot server with no control host: limits from SkyPilot's own settings and the worker, guard optional
+- [ ] Spot price cap through a provider pricing policy (Nebius), live test
+- [ ] Live test of a worker limit stop and its relaunch, and of the ordered on-demand fallback
 - [ ] Live test of the guard's on-demand fallback and cancel paths
 - [ ] Control-plane backup and restore
 

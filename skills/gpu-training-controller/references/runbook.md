@@ -5,6 +5,18 @@ version chosen at the start: confirm them with that version's `--help`, and take
 official `skypilot` skill. The host needs the user's approval (size, region, disk, monthly cost) and
 access set up by the user; never ask for secret values in chat. Steps marked *(offline only)* have not run in a live test yet; the rest ran live (`VALIDATION.md`).
 
+## 0. Which server
+From intake item 15, recorded as `controller.mode` in the contract:
+- **`self-hosted`**: a control host the user runs (steps 1-7 below; step 8 of the SKILL only for a long-lived one).
+- **`existing`** (a server someone else runs, such as a team's) or **`provider-managed`** (a cloud provider's hosted
+  server): no control host; connect to it ([existing server](#an-existing-provider-managed-or-local-server)).
+- **`local`**: the API server on the operator's machine (`sky api start`), for development and small runs. Managed
+  jobs then run their controller on a cloud VM SkyPilot creates (deployment and state: consolidated or separate);
+  budget it. Recovery does not depend on the laptop staying awake.
+Without a control host the runbooks run on the operator's machine as the SkyPilot client, long builds and data
+copies run on a short-lived CPU VM through the same SkyPilot (image runbook; data skill: staging), and the run's
+limits run in the worker (no guard needed).
+
 ## 1. Operator network (laptop)
 ```bash
 python3 <skill-dir>/scripts/net_check.py
@@ -81,21 +93,44 @@ for every helper that imports SkyPilot (the guard, `render_job.py --validate-wit
 work (image builds, data preparation) through `scripts/stage.sh run NAME -- CMD` and `stage.sh wait NAME`,
 so an SSH drop never kills it.
 
-## Using an existing or shared API server *(offline only)*
-Instead of steps 2-5, a run may use an API server that already exists, possibly shared with other people.
-Check, and record in the controller plan:
-- **Version:** `sky api info` server version equals the client chosen at the start; record it, and check it
-  again before every launch: another user may upgrade the server mid-run (that changes the recovery path;
-  pause and rerun the start checks).
-- **Identity and workspace:** your login, its role, and the active workspace (`sky api info`); the guard
-  must use a login that may cancel your job, in the same workspace.
-- **Cloud credentials are the server's**, not yours: spend lands on whoever owns them; confirm the account,
-  the quota you may use and how cost is attributed; never change the server's cloud configuration.
-- **Consolidated control on a shared host:** managed jobs of everyone run as processes on the server host;
-  check its headroom (commands reference: shared or small control host) and its uptime policy.
-- **The guard** still runs on a host you control with a durable ledger and a notify command; the job's
-  logs and queue are visible to other users of the server: no secrets in logs or job names.
-- Do not restart, upgrade or reconfigure a shared server; ask its owner.
+## An existing, provider-managed or local server
+*(offline only for an existing or local server; a provider-managed one ran live)*
+Instead of steps 2-5. The client must match the server's version (SkyPilot supports only adjacent client and server
+versions; a server the user does not run picks its own version):
+```bash
+python3 -m venv ~/sky-venv && ~/sky-venv/bin/pip install -q '<skypilot or skypilot-nightly>[<cloud>]==<the server version>'
+```
+The user logs in, in their own terminal, never in chat or in a command the agent runs:
+- preferred, if the server offers it: a service-account token with an expiry that covers the campaign
+  (`sky api login -e <endpoint> --token <token>`, typed by the user);
+- otherwise the server's documented login, for example basic auth with the password inside the URL. The client then
+  stores the URL, password included, in `~/.sky/config.yaml`: never print that file, and read `sky api info` only
+  through the redaction filter below.
+```bash
+sky api info -o json | sed -E 's#://[^@]*@#://<redacted>@#g'
+sky check <cloud>
+sky status -u | grep -i sky-jobs-controller || echo "no separate jobs controller (consolidated, or none yet)"
+```
+Check: the server version equals the installed client; the cloud is enabled; your login, role and active workspace;
+the jobs-controller mode. Record in the contract `controller.endpoint` (the host and port only, no user, password or
+query: the validator refuses them) and `controller.server_version`; `--locked` compares it, so a server upgrade
+reruns the start checks before a relaunch (requalify only if the release notes touch the recovery path).
+- **Cloud credentials are the server's**, not yours: spend lands on whoever owns them; confirm the account, the quota
+  you may use and how cost is attributed; never change the server's cloud configuration. A stop by hand uses the
+  provider hooks, which need your own provider CLI login on the operator's machine.
+- **Shared with other people:** managed jobs of everyone run on the server (or its controller); check its headroom
+  (commands reference: shared or small control host) and its uptime policy. Job lists and logs are visible to other
+  users: no secrets in logs or job names. Use only your own jobs and clusters: take the job id `sky jobs launch`
+  prints, and cancel by id only, never `-a` or `-u` with `sky jobs cancel` or `sky down`.
+- **Server down or restarted by its owner:** the job's VMs keep billing; the worker's limits still stop the run.
+  Tell the user; nobody restarts, upgrades or reconfigures a server they do not run.
+- **Logs:** a hosted server may keep managed-job logs only for a while (for example 7 days); the finish runbook
+  saves them before that.
+- **`hf://` mounts** of a private or gated dataset need the HF token on the server's host, which you cannot reach:
+  the data loader reads `HF_TOKEN` from the launch's secrets instead (data skill: staging).
+- **The optional guard** (`monitoring.guard: external`) runs on a machine that stays awake and online for the
+  campaign, else a small CPU VM, with a login that may cancel your job in the same workspace.
+- Step 8 (backup and restore) does not apply to a server the user does not run.
 
 ## Status, any time
 ```bash

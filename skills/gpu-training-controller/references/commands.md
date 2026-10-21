@@ -8,7 +8,7 @@ sky api start --help
 sky api info
 sky status -u
 ```
-If login is needed and permitted, use `sky api login -e https://verified-control.example.org`, replacing that placeholder with the recorded actual endpoint. Then compare `sky api info` (health, version, commit) with the version lock. Do not silently create fresh cloud credentials or service accounts. Check selected existing cloud access with `sky check PROVIDER` only after choosing the correct provider/account; it updates enabled-cloud cache.
+If login is needed and permitted, the user runs `sky api login -e https://verified-control.example.org` in their own terminal, with the recorded actual endpoint (a password or token is never typed by the agent; redaction: runbook, existing server). Then compare `sky api info` (health, version, commit) with the version lock. Do not silently create fresh cloud credentials or service accounts. Check selected existing cloud access with `sky check PROVIDER` only after choosing the correct provider/account; it updates enabled-cloud cache.
 
 ## Shared or small control host
 Total host capacity is not free headroom. Before deployment inspect existing service CPU/RSS, peak load, available RAM, disk capacity/IOPS and network load over representative use. On Linux, `free -h`, `df -h`, `uptime`, and available process/container metrics are read-only starting points. Agree with the host owner on a CPU/memory/disk budget that preserves existing service headroom; avoid changing their settings or stopping their processes. Do not claim this host can support a controller until a representative one-job launch/recovery test fits that budget.

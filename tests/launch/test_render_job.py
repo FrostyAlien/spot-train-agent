@@ -175,18 +175,71 @@ class ExtensionTests(unittest.TestCase):
         m['budget'].update(controller_allowance=15.0)
         with self.assertRaisesRegex(ValueError, 'no runway'):
             render(m, ['python', 'train.py'])
-    def test_approved_fallback_renders_separate_on_demand_task(self):
-        m = fixture(); m['recovery'].update(allow_on_demand=True,
-                                            on_demand_fallback={'approved': True, 'after_capacity_wait_minutes': 120})
+    def test_approved_fallback_with_the_guard_renders_separate_on_demand_task(self):
+        m = fixture(); m['monitoring'] = {'guard': 'external'}
+        m['recovery'].update(allow_on_demand=True, on_demand_fallback={'approved': True, 'after_capacity_wait_minutes': 120})
         primary = render(m)
         self.assertIs(primary['resources']['use_spot'], True)          # primary never mixes purchase modes
         self.assertNotIn('any_of', primary['resources'])
+        self.assertEqual(primary['resources']['job_recovery']['strategy'], 'FAILOVER')
         fb = render(m, variant='on-demand-fallback')
         self.assertIs(fb['resources']['use_spot'], False)
         self.assertEqual((fb['name'], fb['envs']['PURCHASE_MODE']), ('test-run-od', 'on-demand-fallback'))
         with self.assertRaises(ValueError): render(fixture(), variant='on-demand-fallback')
-        m['recovery']['on_demand_fallback']['approved'] = False
+        m['recovery']['on_demand_fallback'] = {'approved': True}        # the guard needs its timed wait
         with self.assertRaises(ValueError): render(m)
+        m['recovery']['on_demand_fallback'] = {'approved': False, 'after_capacity_wait_minutes': 120}
+        with self.assertRaises(ValueError): render(m)
+    def test_approved_fallback_without_the_guard_is_ordered_spot_first(self):
+        m = fixture(); m['recovery'].update(allow_on_demand=True, on_demand_fallback={'approved': True})
+        r = render(m)['resources']
+        self.assertNotIn('use_spot', r)
+        self.assertNotIn('infra', r)
+        self.assertEqual(r['ordered'], [{'infra': 'aws/us-east-1', 'use_spot': True},
+                                        {'infra': 'aws/us-east-1', 'use_spot': False}])
+        self.assertEqual(r['job_recovery']['strategy'], 'EAGER_NEXT_REGION')   # spot first again on each recovery
+        self.assertIs(render(fixture())['resources']['use_spot'], True)        # no approval: spot only, FAILOVER
+        self.assertEqual(render(fixture())['resources']['job_recovery']['strategy'], 'FAILOVER')
+    def budgeted(self, **budget):
+        m = fixture()
+        m['budget'].update(total_limit=50, controller_allowance=2, ceiling_hourly_usd=4.5, free_without_vm=True, **budget)
+        m['recovery'].update(max_capacity_wait_minutes=60, startup_allowance_minutes=8, max_attempts_without_progress=6)
+        return m
+    def test_the_workers_limits_are_rendered_for_the_run_only(self):
+        j = render(self.budgeted(), ['python', 'train.py'], campaign_start=1_700_000_000)
+        e = j['envs']
+        self.assertEqual((e['BUDGET_LIMIT_USD'], e['BUDGET_RESERVED_USD'], e['CEILING_HOURLY_USD'], e['FREE_WITHOUT_VM'],
+                          e['STARTUP_ALLOWANCE_MINUTES'], e['MAX_ATTEMPTS_WITHOUT_PROGRESS'], e['MAX_ATTEMPTS'],
+                          e['CAMPAIGN_SUBMITTED_AT']),
+                         ('50', '2', '4.5', '1', '8', '6', '3', '1700000000'))   # every job of the run: its first submission
+        self.assertTrue(render(self.budgeted())['envs']['CAMPAIGN_SUBMITTED_AT'].isdigit())   # default: now
+        q = render(self.budgeted(), ['python', 'train.py'], variant='qualify', qualify_tag='q1')
+        self.assertNotIn('BUDGET_LIMIT_USD', q['envs'])
+        self.assertNotIn('BUDGET_LIMIT_USD', render(fixture())['envs'])      # unknown budget: planning only
+        with self.assertRaises(ValueError): render(self.budgeted(), campaign_start=-1)
+        m = self.budgeted(); m['recovery'].update(max_attempts_without_progress=None, startup_allowance_minutes=None)
+        e = render(m)['envs']                                          # null renders the defaults, never 'None'
+        self.assertEqual((e['MAX_ATTEMPTS_WITHOUT_PROGRESS'], e['STARTUP_ALLOWANCE_MINUTES']), ('10', '10'))
+    def test_notification_channel_is_a_required_secret_and_a_format(self):
+        m = fixture(); m['monitoring'] = {'notify': {'channel': 'ntfy', 'format': 'slack'}}
+        j = render(m, secrets=['WANDB_API_KEY'])
+        self.assertEqual(j['envs']['SECRET_NAMES'], 'WANDB_API_KEY,NOTIFY_URL')
+        self.assertEqual(j['envs']['NOTIFY_FORMAT'], 'slack')
+        self.assertIn('NOTIFY_URL', secret_names(m))
+        self.assertNotIn('NOTIFY_URL', secret_names(fixture()))
+    def test_spot_price_cap_reaches_the_primary_worker_only(self):
+        m = fixture(); m['budget']['spot_price_cap'] = {'per_gpu_hour': 1.2, 'cap_id': 'pricingpolicy-e00abc'}
+        self.assertEqual(render(m)['envs']['PRICE_CAP_ID'], 'pricingpolicy-e00abc')
+        self.assertNotIn('PRICE_CAP_ID', render(m, variant='qualify', qualify_tag='q1')['envs'])
+        m['budget']['spot_price_cap']['cap_id'] = 'bad id; rm'
+        with self.assertRaises(ValueError): render(m)
+    def test_scheduling_timeout_only_on_request(self):
+        m = self.budgeted()
+        self.assertNotIn('job', render(m))
+        self.assertEqual(render(m, scheduling_timeout=True)['job'], {'wait_for_scheduling_timeout': '68m'})
+        self.assertNotIn('job', render(m, variant='qualify', qualify_tag='q1', scheduling_timeout=True))
+        del m['recovery']['max_capacity_wait_minutes']
+        with self.assertRaises(ValueError): render(m, scheduling_timeout=True)
     def minimal(self):
         m = fixture(); m.update(tier='minimal', purchase_model='on-demand')
         m['recovery'].update(enabled=False, max_attempts=0)

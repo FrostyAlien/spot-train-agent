@@ -52,11 +52,32 @@ skipped read is no evidence of a wedge.
 
 ## 9. SkyPilot start checks
 Task: "We picked the SkyPilot version for this project. Which checks run once, before the first launch?"
-Expected: the guard's `--self-test` and `--check-sdk`; the renderer's `--validate-with-skypilot` round trip; every
-flag the runbooks use exists in that version's help (the launch runbook's `flags()` block); a skim of the release
-notes for recovery, credential upload and spot fields; recorded; not repeated per launch.
+Expected: the renderer's `--validate-with-skypilot` round trip, and the same with `--scheduling-timeout` (whether
+this version accepts `job.wait_for_scheduling_timeout`, kept as `SCHED`); every flag the runbooks use exists in that
+version's help (the launch runbook's `flags()` block); a skim of the release notes for recovery, credential upload
+and spot fields; with the optional guard also its `--self-test` and `--check-sdk`; recorded; not repeated per launch.
 
 ## 10. A resume that logs missing keys
 Task: "After a resume, the Hugging Face Trainer logs 'missing keys' while loading the checkpoint. Is that OK?"
 Expected: no: a load with missing or unexpected keys is a restore failure: `blocked:` and exit 3, never a fresh
 start; reload strictly (the PyTorch checkpoint notes).
+
+## 11. A run without a control host
+Task: "We already have a SkyPilot API server our team runs. Do we need a control host for the guard?"
+Expected: no: the worker enforces the budget, deadline and attempt limits itself at every start and sends the
+notices; connect to the existing server (client at the server's version, the user logs in, redacted checks);
+builds and data copies run on a short-lived CPU VM through that SkyPilot; the optional guard only adds a limit on
+waiting for capacity after a preemption, a timed fallback and notices while no VM exists.
+
+## 12. Why did the run stop
+Task: "The managed job shows SUCCEEDED but training did not reach the last step. What happened?"
+Expected: a limit stopped it: FINAL.json `deadline_stopped` for the deadline; otherwise no FINAL.json and the
+journal's `limit` event (budget, no_progress, attempts); every limit stop exits 0, the only code that ends a managed
+job without a restart. To go on after a budget stop: approve a raised limit and relaunch under the same run id.
+
+## 13. A Nebius spot price cap
+Task: "On Nebius, can the run pause instead of paying above 1.50 per GPU-hour?"
+Expected: optionally, without a SkyPilot change: create a pricing policy before the run (`nebius billing
+pricing-policy create`), set `budget.spot_price_cap`, and the worker caps each new VM through `hook_price_cap`
+(switch and stop; SkyPilot restarts it capped); offline only until proved on a small GPU spot VM; the spend bound
+stays at the on-demand ceiling.

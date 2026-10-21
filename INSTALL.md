@@ -18,7 +18,7 @@ claude plugin marketplace add https://github.com/skypilot-org/skypilot.git --spa
 claude plugin install spot-trainer --marketplace https://github.com/FrostyAlien/spot-trainer.git --scope project
 ```
 
-Use `--scope user` on both for every project. `--sparse` skips checking out the whole SkyPilot repository. The HTTPS URLs work on machines without GitHub SSH keys.
+Use `--scope user` on both for every project. `--sparse` skips checking out the whole SkyPilot repository. The HTTPS URLs work on machines without GitHub SSH keys. Marketplaces are registered once per machine, by name. If `claude plugin marketplace list` already shows a `spot-trainer` from another source (a fork or a local copy), adding this one repoints it for every project on the machine. Keep one source.
 
 Check: `claude plugin list` shows `spot-trainer@spot-trainer` and `skypilot@skypilot` enabled; `claude plugin details spot-trainer` lists the nine skills plus `start`, and `claude plugin details skypilot` one skill. They load in the next session (or after `/reload-plugins`). If `spot-trainer` shows `failed to load` with a missing `skypilot@skypilot`, the first command was skipped: run it, then `/reload-plugins`.
 
@@ -61,7 +61,7 @@ Report what you installed and where, then tell them how to start. The bundled he
 
 Starting needs no special syntax: the user asks in plain words, for example "Plan a spot training run for this repository", and the `gpu-training-lifecycle` skill picks it up. With the Claude Code plugin, `/spot-trainer:start` does the same and continues a run already in progress.
 
-What happens next, in one paragraph for the user: the lifecycle skill reads their repository, asks its intake questions once (budget, GPUs, provider, data, how much the agent may do without asking), then walks through provider selection, a small control host, the image and data, one short GPU qualification run, the launch, monitoring and the finish. The agent asks before anything that costs money or deletes something. While training runs, a small guard on the control host enforces the budget and sends notifications, so no chat session has to stay open; the agent comes back to read progress, judge the training at planned evaluations and handle incidents.
+What happens next, in one paragraph for the user: the lifecycle skill reads their repository, asks its intake questions once (budget, GPUs, provider, data, how much the agent may do without asking), then walks through provider selection, the SkyPilot API server (an existing one, or a small control host), the image and data, one short GPU qualification run, the launch, monitoring and the finish. The agent asks before anything that costs money or deletes something. While training runs, the training container itself enforces the budget and sends notifications, so no chat session or extra machine has to stay on; the agent comes back to read progress, judge the training at planned evaluations and handle incidents.
 
 ## Which skill does what
 
@@ -71,10 +71,10 @@ Start with `gpu-training-lifecycle`; it calls the others. Each one can also be u
 |---|---|
 | `gpu-training-lifecycle` | Plan an experiment, or continue one, across all stages |
 | `gpu-rental-select` | Compare current GPU offers and total cost, spot or on-demand |
-| `gpu-training-controller` | Set up or check the control host (SkyPilot API server, guard) |
+| `gpu-training-controller` | Choose and connect the SkyPilot API server: a control host, or an existing or provider-managed one |
 | `gpu-training-image` | Build and check the training image |
 | `gpu-training-data` | Put the dataset in the provider's storage and read it from training |
-| `gpu-training-launch` | Run the qualification task and launch the job with its guard |
+| `gpu-training-launch` | Run the qualification task and launch the job with its limits |
 | `gpu-training-observe` | Check how a run is going: progress, spend, preemptions, stalls |
 | `gpu-training-recover` | Wire checkpoint resume into training code, or diagnose a failed resume |
 | `gpu-training-finish` | Verify outputs, reconcile cost and clean up exactly what the run created |

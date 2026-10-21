@@ -39,6 +39,11 @@ At exit: `WATCH-SUMMARY {json}` (gaps, eval tail, phase durations, longest quiet
 the watcher's own CPU time), printed and appended to $HEARTBEAT_DIR/summaries.jsonl. A SIGTERM to the watcher
 (cancel, runtime timeout) is passed to the launcher, which gets 60 s. A watchdog error prints one WATCH-ERROR line
 and turns the watchdog off for that start: it never stops a healthy run.
+With $CHECKPOINT_DIR set, the watcher keeps one alive file per allocation on the checkpoint mount,
+$CHECKPOINT_DIR/alive/<start>-<host>.json ({start, last, period_seconds}, epoch seconds), rewritten at start, every
+PROGRESS_PERIOD_SECONDS (also after a WATCH-ERROR) and at exit: the run's limits (checkpoint_marker.py limits) read how long each allocation ran.
+With $NOTIFY_URL set, a stall is also sent through notify.py next to this file (best effort, 20 s at most).
+A failure of either prints one WATCH-WARN line and changes nothing else.
 """
 import json
 import numbers
@@ -59,6 +64,43 @@ FLUSH = 4 << 20                   # bytes per second of system writeback that co
 OLD = ('STALL_FLOOR_SECONDS', 'STALL_SEED_GAP_SECONDS', 'PHASE_BUDGETS')   # v0.8 settings, refused
 PROC = Path('/proc')
 _me = {}                          # this process's heartbeat state
+
+
+class Alive:
+    """This allocation's alive file on the checkpoint mount; fails open (one warning, then silent)."""
+
+    def __init__(self, period: float):
+        root = os.environ.get('CHECKPOINT_DIR')
+        self.start, self.period = time.time(), period
+        stamp = datetime.fromtimestamp(self.start, timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        host = ''.join(c for c in os.uname().nodename if c.isalnum() or c in '-.')[:40] or 'host'
+        self.path = Path(root) / 'alive' / f'{stamp}-{host}.json' if root else None
+
+    def write(self):
+        """Rewrite the file; on failure warn once and try again next time (a mount hiccup must not end it)."""
+        if self.path is None:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps({'start': self.start, 'last': time.time(),
+                                             'period_seconds': self.period}))
+            self.warned = False
+        except OSError as e:
+            if not getattr(self, 'warned', False):
+                print(f'WATCH-WARN alive file not written ({type(e).__name__}); retried every period: until a write '
+                      'succeeds, the limits count this allocation from its journal events', flush=True)
+            self.warned = True
+
+
+def _notify(text: str, event: str) -> None:
+    """Best effort through notify.py next to this file; never raises, never waits more than 20 s."""
+    if not os.environ.get('NOTIFY_URL'):
+        return
+    try:
+        subprocess.run([sys.executable, str(Path(__file__).with_name('notify.py')), '--event', event, text],
+                       timeout=20, check=False)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f'WATCH-WARN notice not sent ({type(e).__name__})', flush=True)
 
 
 def _dir() -> Path:
@@ -370,6 +412,9 @@ def watch(argv: list) -> int:
     if not io.ok:
         print('WATCH-WARN /proc/<pid>/io is not readable here: judging by ticks alone', flush=True)
     started = io_at = t0 = time.monotonic()
+    beat = Alive(period)
+    beat.write()
+    last_beat = time.monotonic()
     cpu0 = time.process_time()
     quiet_max, io_mb = {}, {}
     proc = subprocess.Popen(argv, start_new_session=True)
@@ -421,10 +466,16 @@ def watch(argv: list) -> int:
                 if asked:
                     print(f'WATCH-NOTE dump requested through {asked} pipe(s) ({os.environ["STALL_DUMP_PIPES"]})', flush=True)
                 _dump_stacks({int(x['pid']) for x in live})             # every rank's stack into the log
+                _notify(f"STALL in phase {phase} at step {r.get('step')} (silent {gap:.0f} s, limit {lim:.0f} s): "
+                        'stopping the run, exit 93; every rank\'s stack is in the job log', 'stall')
                 time.sleep(dump_wait)
                 _stop(proc, term_wait)
+                beat.write()
                 _summary(d, read_ranks(d), stats())
                 return STALL_EXIT
+        if time.monotonic() - last_beat >= period:        # outside the watching block: kept after a WATCH-ERROR
+            beat.write()
+            last_beat = time.monotonic()
         try:
             code = proc.wait(poll)
             break
@@ -434,6 +485,7 @@ def watch(argv: list) -> int:
             _stop(proc, 60)
             code = proc.returncode
             break
+    beat.write()
     _summary(d, read_ranks(d), stats())
     return code if code >= 0 else 128 - code
 

@@ -1,7 +1,8 @@
 # Qualification and launch runbook
 
-On the control host in bash (`flags()` and `${PIPESTATUS[0]}` below are bash; zsh reports nothing from
-`flags()`), with the pinned client's `sky` (`source ~/sky-venv/bin/activate` in each new shell) and the helpers
+On the control host in bash, or without one on the operator's machine as the SkyPilot client (controller skill:
+the server choices); `flags()` and `${PIPESTATUS[0]}` below are bash (zsh reports nothing from `flags()`), with the
+pinned client's `sky` (`source ~/sky-venv/bin/activate` in each new shell) and the helpers
 by absolute path: `R=<launch-skill>/scripts/render_job.py`, `G=<observe-skill>/scripts/campaign_guard.py`,
 `ST=<controller-skill>/scripts/stage.sh` (long launches run detached through it, so an SSH drop never kills
 them and the exit code is the launch's own), and `P=~/sky-venv/bin/python` for the helpers that import
@@ -20,6 +21,7 @@ The project owns a small script that prints `NAME=value` lines from files and th
 set -euo pipefail
 source /abs/provider-hooks.sh
 echo "WANDB_API_KEY=$(cat ~/.secrets/wandb)"
+echo "NOTIFY_URL=$(cat ~/.secrets/notify-url)"        # the notification channel: a topic or webhook URL
 echo "SKYPILOT_DOCKER_SERVER=<registry host>"
 echo "SKYPILOT_DOCKER_USERNAME=$(hook_registry_username)"
 echo "SKYPILOT_DOCKER_PASSWORD=$(hook_registry_password)"
@@ -29,7 +31,8 @@ mkdir -p $W/tasks $W/qualify
 (umask 077; bash /abs/secrets-env.sh > $W/secrets.env)
 python3 $R /abs/experiment.json --secret WANDB_API_KEY --check-secret-file $W/secrets.env
 ```
-Check: `"ok": true` (names only are printed). Delete the file after the launch (`rm $W/secrets.env`);
+Check: `"ok": true` (names only are printed; `NOTIFY_URL` is required whenever the contract names a
+notification channel). Delete the file after the launch (`rm $W/secrets.env`);
 short-lived registry tokens are refreshed by running the script again.
 
 Start checks, once per chosen SkyPilot version and after the image digest is recorded. First, confirm that
@@ -40,27 +43,36 @@ flags() { local sub=$1 h f; shift; h=$(sky $sub --help 2>&1) || { echo "MISSING:
 flags "jobs launch" -y -d -n --secret-file; flags "jobs queue" -v -o; flags "jobs logs" --tail --no-follow --controller
 flags "jobs cancel" -y --graceful --graceful-timeout; flags launch -y -c -d --dryrun --secret-file --env
 flags exec -d --workdir --secret-file; flags logs; flags cancel -y; flags autostop -y -i --down; flags down -y
-flags status -u; flags "storage ls"; flags check; flags "api info"; flags "api login" -e; flags "api start" --deploy --foreground
+flags status -u; flags "storage ls"; flags check; flags "api info" -o; flags "api login" -e --token; flags "api start" --deploy --foreground
 ```
 Check: no `MISSING` line; otherwise adapt that command from this version's `--help` before going on. Then the
 renderer's round trip with the installed SkyPilot (`$P`) for the primary task and the
-qualification task, then a dry run of the qualification task through the control host's API server (it proves the server answers, is not stale and
+qualification task, then a dry run of the qualification task through the API server (it proves the server answers, is not stale and
 finds the resources; no VM is created; a dry run does not touch file mounts on the server, so the
 controller runbook's step 5 checks the server's view of them):
 ```bash
 $P $R /abs/experiment.json --argv-json "$ARGV" --validate-with-skypilot >/dev/null
 $P $R /abs/experiment.json --argv-json "$ARGV" --variant qualify --qualify-tag t1 --validate-with-skypilot > $W/tasks/dryrun.yaml
 sky launch --dryrun -y $W/tasks/dryrun.yaml
+if $P $R /abs/experiment.json --argv-json "$ARGV" --scheduling-timeout --validate-with-skypilot >/dev/null 2>$W/sched.log
+then SCHED=--scheduling-timeout; else SCHED=; tail -1 $W/sched.log; fi; echo "SCHED=$SCHED"
 ```
-Check: "Parsed and round-tripped" twice and the dry run prints the chosen resources. A `sky` command silent
+Check: "Parsed and round-tripped" twice and the dry run prints the chosen resources. `SCHED` holds `--scheduling-timeout` when
+this SkyPilot version and the contract can bound the wait for the first start (`job.wait_for_scheduling_timeout`).
+Empty `SCHED`: they cannot (the printed line says why), and only the optional guard bounds that wait. Keep the
+value for the run. A `sky` command silent
 for two minutes: read the API server log (controller runbook) before anything else.
 
 ## 1. GPU qualification (once per new stack; inside the approved qualification cap)
 Before it, in the image on CPU: the exact `ARGV` parsed by the framework's own parser (image runbook step 3).
+When the staged full data differs from its source (samples dropped or fixed, at staging or later), also load its
+index or split metadata there with the project's own loader: the split sizes it reports must equal the manifest's
+counts. The qualification reads only the subset, so it cannot catch a mismatch in the full data.
 Optionally, when the user has a GPU of their own and wants to, the same two starts run there first
 (image runbook: [local test](../../gpu-training-image/references/runbook.md#5-local-test-on-the-users-gpu-optional-offline-only)).
-Build the qualification argv `QARGV`: `ARGV` plus the framework's step settings for 20 steps, evaluating and
-saving every 6 (lifecycle entrypoint contract: `qualify`). With a qualification subset (`dataset.qualify_uri`,
+Build the qualification argv `QARGV`: `ARGV` plus the framework's step settings for `3S + 2` steps, evaluating
+and saving every `S`, with `S` = 6 + the loader's look-ahead (lifecycle entrypoint contract, `qualify`): for example
+4 workers x 2 prefetched batches gives `S` = 14 and 44 steps. With a qualification subset (`dataset.qualify_uri`,
 data skill: staging) the task reads the subset instead of the full dataset, in the same mount mode and with
 the same disk. `ES` is the full eval set's size over the subset's. Leave `--eval-scale` out when the project
 does not evaluate.
@@ -81,7 +93,8 @@ second save, then a resume to the end and `finalize`), then
 `wait` as a background command: it returns when the launch ends. The task usually takes about 2-3 minutes once the
 allocation has started (after provisioning, image pull and mounts) and fails fast at the first broken step. `--timeout-minutes` bounds each start: the time to
 the first step (model download, compilation; 10 minutes until `startup_seconds` is measured) plus 10 minutes
-for the steps, evaluations and saves. Each start runs under the stall watchdog with its default limits, not the
+for the steps, evaluations and saves; raise it when `2S` steps plus two saves and two
+evaluations could take more than about 8 minutes (estimate from the project's known step time). Each start runs under the stall watchdog with its default limits, not the
 contract's, so a hang ends within minutes with a `STALL` line and the ranks' stacks. A hang before the first tick
 ends two minutes before the per-start timeout (up to a 32-minute timeout), without stacks; a slow but healthy
 startup there needs a larger `--timeout-minutes`. The limits, and a `STALL` during healthy silent work:
@@ -90,7 +103,9 @@ Check: `stage qualify-$T exit 0` and the journal-check line `{"events": ..., "ok
 renderer stamps the task with its render time, so launch right after rendering); then `sky down -y q-$T`.
 On a failure, first run `sky autostop -y q-$T -i 30 --down`: a launch that failed while provisioning or
 mounting never set the task's own autodown, and `sky status` then shows no AUTOSTOP for a VM that bills until
-someone tears it down. Keep the cluster for the fix loop below, and `$W/secrets.env` with it; `sky down` it
+someone tears it down. If `sky autostop` fails too (the cluster is half set up), run `sky down -y q-$T`, or relaunch on it now
+(`sky launch -y -c q-$T $W/tasks/qualify-$T.yaml --secret-file $W/secrets.env`). Never leave a cluster without
+autostop. Keep the cluster for the fix loop below, and `$W/secrets.env` with it; `sky down` it
 once a qualification passes or the user stops. `peak_memory_fraction` above 0.9
 fails: lower the per-device batch in `ARGV` (raise gradient accumulation to keep the effective batch) and
 repeat; no image rebuild. A spot cluster that the provider stopped during the task (`sky status` shows it
@@ -111,11 +126,13 @@ After a pass, set these and report them to the user in one block:
   I/O), and the save interval they imply; set that interval in `ARGV`. Set `disk.size_gb` so that
   1.25 x `checkpoint_gb` + 10 GB fit beside the image and data. Both rules: `gpu-training-recover` →
   `references/contract.md#checkpoint-size-path-and-save-interval`.
-- **Data:** `loader_wait_fraction` (or `read_mb_s` for `MOUNT` data): a large share means more loader
-  workers or another mount mode before the paid run.
+- **Data:** `loader_wait_fraction` (or `read_mb_s` for `MOUNT` data): above 0.3 the run is limited by data
+  loading, not the GPU. Report it and ask the user to choose: a fix from the data skill
+  (`gpu-training-data` → `references/staging.md#measure-io-in-the-qualification-task`), then qualify again with
+  the new `S` (the fix changes the look-ahead; a deviation in the automatic level), or the measured rate.
 - **Time:** the expected training time is `step_seconds` x the target steps, plus the evaluations
   (`eval_seconds` scaled by the full eval set's size over the subset's); the observe runbook's planned waits
-  use it.
+  use it. The first planned evaluation checks it against the main run's rate (observe runbook).
 - **Hang limits** *(offline only)*: copy the printed `recommended.watchdog` into the contract's `watchdog`; its
   `notes` and tuning: `gpu-training-observe` → `references/guard.md#stall-watchdog`. Set the collective timeout
   in `ARGV` too (entrypoint contract).
@@ -158,32 +175,51 @@ journal-check line with `"ok": true` (no `startup_minutes`: the rehearsal runs n
 ## 3. Approval
 ```bash
 python3 <lifecycle-skill>/scripts/validate_experiment.py /abs/experiment.json --phase launch
-$P $G --init-config --contract /abs/experiment.json --job-id 0 --workdir $W \
-    --notify-cmd '<json argv>' --dry-run
+python3 $R /abs/experiment.json --argv-json "$ARGV" $SCHED | python3 -c 'import json,sys; e=json.load(sys.stdin)["envs"];
+print({k: v for k, v in e.items() if k.startswith(("BUDGET_", "CEILING_", "MAX_ATTEMPTS", "FREE_", "STARTUP_"))})'
 ```
-Check: `"valid": true` (read any `warnings`, e.g. what bounds spend if the guard host dies); the dry run
-prints `runway_hours` (job time the budget allows at the ceiling; the validator already checked it covers
-`budget.planned_job_hours`), the attempt limits, `deadline_utc` (null: none, the budget is the hard stop)
-and carried-over spend and attempts. Before the dry run, add the spend made outside the guard so far
-(qualification, data, control host) to `budget.controller_allowance` and note it in `qualification.json`.
+Check: `"valid": true` (read any `warnings`: spend the run's limits cannot see); the limits the worker will
+enforce, as rendered. The runway (job time the budget allows at the ceiling) is (total_limit -
+controller_allowance) / ceiling_hourly_usd less the 6-minute shutdown reserve; the validator already checked it covers
+`budget.planned_job_hours`. Before this, add the spend made outside the run so far (qualification, data,
+control host) to `budget.controller_allowance` and note it in `qualification.json`. With the optional guard
+(`monitoring.guard: external`) also run `$P $G --init-config --contract /abs/experiment.json --job-id 0 --workdir $W
+--notify-cmd '<json argv>' --dry-run`: it prints the guard's `runway_hours`, attempt limits, `deadline_utc` and
+carried-over spend and attempts.
 Every spend figure here and in later reports is an upper bound at the on-demand price; the real spot cost
-comes from the provider's bill. Approval at the interaction level: SKILL step 8. The notify command
-receives one JSON message on stdin (for example `["curl","-sS","-d","@-","https://ntfy.sh/<private topic>"]`).
+comes from the provider's bill. Approval at the interaction level: SKILL step 8. The guard's notify command
+receives one JSON message on stdin; it reads the URL from the secrets script (the secrets file is deleted after the
+launch), so the URL never sits in its argv or the guard's files (for example
+`["bash","-c","curl -sS -d @- \"$(bash /abs/secrets-env.sh | sed -n s/^NOTIFY_URL=//p)\""]`).
 
-## 4. Submit and guard (Standard tier)
-A new run revision (new `run_id`) therefore gets a new `$W`; the earlier run's guard bound is carried in `budget.controller_allowance`. Immediately before submitting, the dry run
-must say ok, so a job is never left unguarded:
+## 4. Submit (Standard tier), then the optional guard
+A new run revision (new `run_id`) gets a new `$W`; the earlier run's spend is carried in `budget.controller_allowance`.
+*(offline only)* Once per notification channel (the first launch, or after the channel changed): the secrets file holds
+`NOTIFY_URL`, and the message must arrive:
 ```bash
-$P $G --init-config --contract /abs/experiment.json --job-id 0 --workdir $W --notify-cmd '<json argv>' --dry-run | grep -q '"runway_hours"' || { echo "guard config refused: fix it before submitting"; exit 1; }
+NOTIFY_URL=$(sed -n 's/^NOTIFY_URL=//p' $W/secrets.env) python3 <observe-skill>/scripts/notify.py --strict --event check "notification check for $RUN"
+```
+Check: exit 0 and the message arrived where the user reads it. Then submit:
+```bash
+[ -f $W/campaign-start ] || date +%s > $W/campaign-start      # the run's first submission, kept for relaunches
 S=$(date -u +%Y%m%dT%H%M%SZ)
-python3 $R /abs/experiment.json --argv-json "$ARGV" --secret WANDB_API_KEY > $W/tasks/$RUN-$S.yaml
+python3 $R /abs/experiment.json --argv-json "$ARGV" --secret WANDB_API_KEY $SCHED --campaign-start "$(cat $W/campaign-start)" > $W/tasks/$RUN-$S.yaml
 sky jobs launch -y -d -n $RUN $W/tasks/$RUN-$S.yaml --secret-file $W/secrets.env && JOB=$(sky jobs queue -o json |
     python3 -c 'import json,sys; print(max(j["job_id"] for j in json.load(sys.stdin) if j["job_name"] == sys.argv[1]))' $RUN)
 echo "job $JOB"; rm $W/secrets.env
 ```
 Check: one integer (job ids only grow, so the newest job named `$RUN` is this one). If the launch failed
 or timed out without an id, do not resubmit: look for the job first (`sky jobs queue -o json`, name `$RUN`,
-recent `submitted_at`).
+recent `submitted_at`). Every job of the run renders with the same `$W/campaign-start`, so the worker's spend bound
+covers earlier jobs and the gaps between them (with `budget.free_without_vm`, the run's alive files count every
+allocation instead). Spend outside the run (qualification, data, control host, earlier run revisions) is counted once,
+in `budget.controller_allowance`. Without `budget.free_without_vm` the time between jobs counts too (a relaunch a day
+later starts with a day spent): relaunch soon, or raise the budget with approval. The worker now enforces the run's limits and notifies; continue with the observe runbook. The rest of this section is only
+for the optional guard (`monitoring.guard: external`); before the submission above, its dry run must then say ok:
+```bash
+$P $G --init-config --contract /abs/experiment.json --job-id 0 --workdir $W --notify-cmd '<json argv>' --dry-run | grep -q '"runway_hours"' || { echo "guard config refused: fix it before submitting"; exit 1; }
+```
+Then, after the submission:
 ```bash
 $P $G --init-config --contract /abs/experiment.json --job-id $JOB --workdir $W --notify-cmd '<json argv>' \
     [--vm-count-cmd '["bash","-c","source /abs/provider-hooks.sh; hook_instance_ids \"$1\"","_"]']
@@ -204,15 +240,16 @@ brings back a clean process. Without systemd, run the loop through the controlle
 *(offline only)* With `budget.free_without_vm` (the provider bills compute only while a VM exists), `--vm-count-cmd` lets the
 guard see that a waiting job has no VM, so that waiting is not charged; without it only PENDING time is free.
 
-*(offline only)* Approved on-demand fallback: render it once with `--variant on-demand-fallback` to an absolute path and
-add `--fallback-task <path> --secrets-cmd '["bash","/abs/secrets-env.sh"]'` to `--init-config`; the guard
+*(offline only)* Approved on-demand fallback: render it once with `--variant on-demand-fallback --campaign-start "$(cat $W/campaign-start)"` (like the
+primary task) to an absolute path and add `--fallback-task <path> --secrets-cmd '["bash","/abs/secrets-env.sh"]'` to `--init-config`; the guard
 re-reads the secrets when it fires.
 
-Relaunch after a failure: the earlier job must be terminal and its guard ledger done
-(`$P $G --close-job --workdir $W --job-id <old job>`). Before `--init-config`, recompute
-`budget.controller_allowance` from what was spent outside the guard since the last launch (fix-loop
-qualifications, the control host's hours); the guard's runway shrinks by it. `--init-config` then carries
-the earlier job's spend bound and attempts into the new guard, and refuses when no attempt is left.
+Relaunch after a failure: the earlier job must be terminal (with the guard, its ledger done:
+`$P $G --close-job --workdir $W --job-id <old job>`). Recompute `budget.controller_allowance` from what was spent
+outside the run since the last launch (fix-loop qualifications, the control host's hours); the runway shrinks by
+it. The worker's limits read the run's journal and alive files, so attempts carry over by themselves; with the
+guard, `--init-config` carries the earlier job's spend bound and attempts into the new guard and refuses when no
+attempt is left.
 
 ## Minimal tier *(offline only)*
 ```bash

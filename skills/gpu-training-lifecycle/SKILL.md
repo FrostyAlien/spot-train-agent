@@ -19,7 +19,7 @@ Scope: one SkyPilot-launched cloud VM with up to eight GPUs; flag larger or dist
 2. **Choose the starting point, the interaction level and a tier with the user** ([working rules](references/working-rules.md#questions-to-the-user)); they decide.
    - Starting point: new, or continue from the project's existing progress.
    - Interaction level (`approval.mode`): automatic, gated (default) or steps.
-   - Tier: Standard (`tier: standard`, default: Managed Jobs recovery, campaign guard) or Minimal (`tier: minimal`: one self-bounding on-demand `sky launch` cluster for a short run the user watches). Both share image, data and checkpoint rules.
+   - Tier: Standard (`tier: standard`, default: Managed Jobs recovery, the run's limits in the worker, the campaign guard optional) or Minimal (`tier: minimal`: one self-bounding on-demand `sky launch` cluster for a short run the user watches). Both share image, data and checkpoint rules.
 3. Start the project's `experiment.json` from [the example](assets/experiment.example.json) per [the contract](references/experiment-contract.md); no credentials; preserve existing decisions.
 4. Compare providers before launch; research the chosen one ([checklist](references/provider-research.md), including account state, quota for every planned resource and any official provider agent skills) and record the findings in the project; write the project's [provider hooks](references/provider-hooks.md); then record [the launch selection](references/experiment-contract.md#what-to-record-before-launch).
 5. Validate offline (`--phase launch` before a proposed paid launch; `--locked previous-run-contract.json` for recovery or post-launch changes):
@@ -30,16 +30,16 @@ Scope: one SkyPilot-launched cloud VM with up to eight GPUs; flag larger or dist
    | Stage | Skill | Expected output |
    | ---|---|--- |
    | Compare offers and effective cost | `gpu-rental-select` | timestamped shortlist, workload benchmark plan, chosen offer |
-   | Keep recovery independent of GPU preemption | `gpu-training-controller` | running non-spot control host: pinned client and API server, verified endpoint, start checks passed (state/restore plan only for a long-lived or shared server) |
+   | Keep recovery independent of GPU preemption | `gpu-training-controller` | a SkyPilot API server: a control host the user runs, or a connected existing, provider-managed or local one; client matching the server, verified endpoint, start checks passed (state/restore plan only for a long-lived self-hosted server) |
    | Prepare a portable runtime before renting | `gpu-training-image` | pinned image/build recipe, dependency record, preflight result |
    | Prepare TB-scale data and cache | `gpu-training-data` | immutable data manifest, staging and cache plan |
    | Launch the fixed-provider experiment | `gpu-training-launch` | reviewed job config, confirmed job/resource IDs, run lock |
    | Resume after preemption or interruption | `gpu-training-recover` | verified complete checkpoint and continuation evidence |
-   | Enforce limits while unattended | `gpu-training-observe` | deployed campaign guard (spend ceiling, attempts, capacity wait, optional deadline, notifications) |
+   | Enforce limits while unattended | `gpu-training-recover`, `gpu-training-observe` | the run's limits in the worker (spend ceiling, attempts, optional deadline) and its notices; the optional campaign guard for the capacity wait after a preemption and a timed fallback |
    | Observe progress and investigate | `gpu-training-observe` | latest metrics, incidents, bounded decisions |
    | Export results and release resources | `gpu-training-finish` | verified artifacts, cleanup inventory, realized-cost report |
 8. [Qualify each new software/hardware/storage stack once](references/operating-model.md#qualify-a-new-stack-once), with the entrypoint written per [its contract](references/entrypoint.md): the training argv parsed inside the image on CPU, then one GPU qualification task (fresh, then resume, with the measurements); the CPU rehearsal only when GPUs are unaffordable; a qualified stack skips this. The stack includes the SkyPilot version chosen at the start; run its [start checks](references/gates.md#skypilot-version-chosen-at-the-start-kept-for-the-run) once, not per launch.
-9. Deploy the [runtime](references/operating-model.md#build-once-and-reuse) once as reviewed scripts and callbacks, and operate the run on the control host with each stage skill's runbook ([operating model](references/operating-model.md#operating-model-where-things-run-and-what-runs-them)): wait for notifications, never poll; never change code on your own; only crashes, the stall watchdog and the guard's limits stop a run. Waits and quality checks at the planned evaluations: `gpu-training-observe`.
+9. Deploy the [runtime](references/operating-model.md#build-once-and-reuse) once as reviewed scripts and callbacks, and operate the run from the control host, or without one from the operator's machine, with each stage skill's runbook ([operating model](references/operating-model.md#operating-model-where-things-run-and-what-runs-them)): wait for notifications, never poll; never change code on your own; only crashes, the stall watchdog and the run's limits (the worker's, or the guard's when it runs) stop a run. Waits and quality checks at the planned evaluations: `gpu-training-observe`.
 
 ## Outputs
 - Validated `experiment.json` and adjacent contract artifacts.
@@ -47,7 +47,7 @@ Scope: one SkyPilot-launched cloud VM with up to eight GPUs; flag larger or dist
 
 ## Gates
 - **Provider lock:** fixed once training starts; region too, unless an approved recovery plan permits that provider's other regions. Recovery never silently changes GPU count/type, dataset revision, image, optimizer or learning-rate schedule.
-- **Spot-only default:** no silent on-demand fallback. If spot capacity is not reacquired within the declared wait/attempt limits, stop and report; only the campaign guard may switch to a user-approved, same-provider on-demand fallback (`recovery.allow_on_demand` + `recovery.on_demand_fallback`), as a separate task announced to the user.
+- **Spot-only default:** no silent on-demand fallback. If spot capacity is not reacquired within the declared wait/attempt limits, stop and report. A user-approved, same-provider on-demand fallback (`recovery.allow_on_demand` + `recovery.on_demand_fallback`) is either SkyPilot's ordered spot-then-on-demand resources (no guard) or a separate task the campaign guard launches after a timed wait; either way announced to the user.
 - **Budget approval:** approve vendor/service, payment basis, spending ceiling and recovery range before paying. Manifests, `approved` values and validators authorize nothing and cap no spending. Research or skill-creation requests authorize no cloud launch or paid drill.
 - **Capability and acceptance:** pass the [exact recovery capability gate](references/gates.md#exact-recovery-capability-gate) before creating a task, and the [acceptance gates by area](references/gates.md#acceptance-gates-by-area).
 - **No silent fresh start:** restore the latest COMPLETE verified checkpoint from the GPU provider's durable storage under the recorded policy; authentication/network failures block restoration, never justifying a fresh start.
@@ -63,7 +63,8 @@ Scope: one SkyPilot-launched cloud VM with up to eight GPUs; flag larger or dist
 - [gates.md](references/gates.md): read before the first launch of a stack, when the SkyPilot version changes, or when provider, region, GPU or purchase mode changes.
 - [official-skypilot.md](references/official-skypilot.md#loading-the-official-skill): read before using the official `skypilot` skill for CLI/YAML/SDK specifics.
 - [provider-research.md](references/provider-research.md): read when the user picks a provider or the SkyPilot version changes.
-- [provider-hooks.md](references/provider-hooks.md): read when writing the project's provider hooks for the runbooks.
+- [provider-hooks.md](references/provider-hooks.md): read when writing the project's provider hooks for the runbooks, or setting up the optional spot price cap.
+- [providers/nebius.md](references/providers/nebius.md): read when the provider is Nebius (a dated starting point: its managed SkyPilot server, research rows, hooks and the spot price cap).
 - [entrypoint.md](references/entrypoint.md): read when writing or reviewing the training image's entrypoint.
 - [pytorch.md](references/pytorch.md): read with entrypoint.md when the project uses PyTorch (its collective timeout setting, rank mode for scripts without hooks, hang dumps, checkpoints and restore).
 - [evidence.md](references/evidence.md): read before pinning integrations or labelling evidence.

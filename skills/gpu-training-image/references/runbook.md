@@ -5,7 +5,7 @@ Registry upload needs the user's approval (registry, visibility, contents). The 
 dependencies only: data, checkpoints, secrets and tunable hyperparameters stay outside it. Prefix
 `docker` with `sudo` when the user is not in the `docker` group. Steps marked *(offline only)* have not run in a live test yet; the rest ran live (`VALIDATION.md`).
 
-## Build on a short-lived CPU VM *(offline only)*
+## Build on a short-lived CPU VM
 Without a control host, launch a CPU VM through the user's SkyPilot in the training region (approval: its
 size and hourly price), run steps 1-4 on it, and delete it:
 ```bash

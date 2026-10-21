@@ -3,8 +3,9 @@
 ## Get data into durable storage without a big disk
 A machine that moves a dataset needs disk for the work in progress, not for the dataset. Present the
 options that fit, with a recommendation; **the user decides, and without an answer copy into the
-provider's bucket** (A or B). Run the copy on a CPU machine near the bucket (the control host or a small
-CPU VM in the bucket's region), never on a rented GPU.
+provider's bucket** (A or B). Run the copy on a CPU machine near the bucket (the control host, or without one a short-lived CPU VM launched
+through the user's SkyPilot in the bucket's region, as the image runbook's build VM, deleted afterwards), never on a
+rented GPU.
 
 | Option | How | Local disk | Use when |
 |---|---|---|---|
@@ -65,7 +66,10 @@ crashing hours later.
 
 ## Qualification subset
 Stage a few hundred samples beside the dataset, under `<dataset uri>/qualify/`, with their own manifest,
-prepared exactly like the full data. Choose worst cases: the largest samples by the project's cost driver
+prepared exactly like the full data: the same file format and layout, metadata files included. A dataset card
+or index that declares split sizes must match the samples it lists, in the subset and in the full data. The
+qualification never reads the full data; the launch runbook checks it on CPU first
+(`gpu-training-launch` → `references/runbook.md#1-gpu-qualification-once-per-new-stack-inside-the-approved-qualification-cap`). Choose worst cases: the largest samples by the project's cost driver
 (tokens, pixels after resize, boxes or masks per image), samples with no labels and samples with the most.
 Give the eval split `N·b + 1` samples (N ranks of the planned run, b its per-device eval batch), so every
 way of sharding it ends in an uneven batch. Record the prefix as `dataset.qualify_uri`; the qualification
@@ -81,8 +85,9 @@ The qualification task journals, on rank 0: `save_seconds` (how long each save b
 `journal-check` reports the largest after the first save, the steady state), `checkpoint_gb` (the
 checkpoint size) and `loader_wait_fraction` (the share of step time spent waiting for data; for `MOUNT`
 data also the read rate `read_mb_s`, compared with what the GPUs consume per second). A large loader wait
-means more loader workers, `MOUNT_CACHED` or `COPY`, or larger shards. The subset sits in the page cache,
-so the full data can read slower: watch the step rate of the main run's first minutes.
+means more loader workers, `MOUNT_CACHED` or `COPY`, or larger shards. The full data
+can read slower than the subset; the first planned evaluation checks the rate (`gpu-training-observe` →
+`references/runbook.md#wait-for-a-milestone-blocking-no-polling`).
 
 The save interval these imply, and a different checkpoint path when uploads are too slow:
 `gpu-training-recover` → `references/contract.md#checkpoint-size-path-and-save-interval`.

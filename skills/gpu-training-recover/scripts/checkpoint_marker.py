@@ -24,6 +24,9 @@ Two thin helpers make a run provable after recovery (both write-once files on th
                                                    finish); `sky jobs logs` keeps only the last attempt
   <run_dir>/FINAL.json                             written once at the end: outcome, final step and
                                                    directory, manifest hash, extra artifacts (best model...)
+  <run_dir>/alive/<start>-<host>.json              one per allocation, rewritten by the stall watchdog every
+                                                   progress period: {start, last, period_seconds} (epoch s);
+                                                   the only file here that is rewritten, read by `limits`
 
   commit       STEP_DIR --fields FIELDS.json --files FILES.json    write manifest, verify, then COMMITTED.json;
                                                                    prints `CHECKPOINT_COMMITTED {json}` (the line
@@ -38,6 +41,16 @@ Two thin helpers make a run provable after recovery (both write-once files on th
                                                                    start after an earlier commit (and FINAL.json
                                                                    completed); exit 1 if not; echoes the measurements
                                                                    and the watchdog's recommended quiet limits
+  limits       RUN_DIR (--from-env | --submitted-at EPOCH --ceiling-hourly USD --budget USD) [--reserved USD]
+               [--spent-before USD] [--free-without-vm] [--startup-allowance-minutes M]
+               [--max-attempts-without-progress N] [--max-attempts N] [--deadline ISO] [--shutdown-reserve-minutes M]
+                                                                   the run's limits at a worker start, from the journal
+                                                                   and the alive files: JSON with the spend upper bound,
+                                                                   allocations, stop_at_utc (and stop_by: budget or
+                                                                   deadline) and the limit reached; exit 5 when a limit is
+                                                                   reached now (stop without training). Only the deadline
+                                                                   is final: a budget or attempt stop writes no FINAL.json,
+                                                                   so a relaunch with a raised limit resumes the run
   finalize     RUN_DIR IDENTITY --outcome completed|deadline_stopped|stopped [--target-step N] [--artifact REL ...]
   verify-final RUN_DIR IDENTITY                                     FINAL.json still matches the bucket; exit 3 if not;
                                                                    lists lineage_warnings (lost progress)
@@ -185,7 +198,8 @@ EVENT = re.compile(r'[a-z][a-z0-9_-]{0,39}')
 MEASURES = ('read_mb_s', 'save_seconds', 'checkpoint_gb', 'startup_seconds', 'step_seconds', 'eval_seconds',
             'loader_wait_fraction')
 LOW_UTILISATION = 0.3          # peak GPU memory fraction below which the report says the GPUs are under-used
-OUTCOMES = ('completed', 'deadline_stopped', 'stopped')
+OUTCOMES = ('completed', 'deadline_stopped', 'stopped')   # final; a budget or attempt limit is not (the run can go on)
+LIMIT_EXIT = 5                 # `limits`: a limit is reached now; the worker stops without training
 
 
 def _utc() -> str:
@@ -225,7 +239,9 @@ def read_journal(run_dir) -> list:
 
 
 def _epoch(text: str) -> float:
-    return float(calendar.timegm(time.strptime(text, '%Y-%m-%dT%H:%M:%SZ')))
+    """Unix seconds of an ISO-8601 UTC time ending in Z, with or without seconds (the contract allows both)."""
+    fmt = '%Y-%m-%dT%H:%M:%SZ' if text.count(':') == 2 else '%Y-%m-%dT%H:%MZ'
+    return float(calendar.timegm(time.strptime(text, fmt)))
 
 
 def lineage_problems(runs: list) -> list:
@@ -378,6 +394,117 @@ def prune_list(run_dir, keep: int = 3) -> dict:
     return {'keep': kept, 'final_dir': final, 'prunable': [n for n in names if n < kept[-1] and n not in held]}
 
 
+ALIVE_NAME = re.compile(r'(\d{8}T\d{6}Z)-.*\.json')
+
+
+def read_alive(run_dir) -> tuple[list, list]:
+    """The allocations' alive records ({start, last, period_seconds}) in start order, and the names of unreadable
+    ones. An unreadable record (an upload cut off) keeps its start from the file name and no last time."""
+    records, bad = [], []
+    root = Path(run_dir) / 'alive'
+    for f in sorted(root.glob('*.json')) if root.is_dir() else []:
+        try:
+            r = json.loads(f.read_text())
+            records.append({k: float(r[k]) for k in ('start', 'last', 'period_seconds')})
+        except (OSError, ValueError, KeyError, TypeError):
+            bad.append(f.name)
+            m = ALIVE_NAME.fullmatch(f.name)
+            if m:
+                records.append({'start': float(calendar.timegm(time.strptime(m.group(1), '%Y%m%dT%H%M%SZ'))),
+                                'last': None, 'period_seconds': 300.0})
+    return sorted(records, key=lambda r: r['start']), bad
+
+
+def _starts(events: list) -> list:
+    """Journal events grouped per worker start, in time order (an unreadable entry belongs to no start)."""
+    attempts = {}
+    for e in events:
+        if 'error' not in e:
+            attempts.setdefault(e['attempt'], []).append(e)
+    order = sorted(attempts, key=lambda a: (min((_epoch(e['time']) for e in attempts[a] if 'time' in e),
+                                                default=0), a))
+    return [attempts[a] for a in order]
+
+
+def limits(run_dir, *, submitted_at: float, ceiling_hourly: float, budget: float, now: float | None = None,
+           reserved: float = 0.0, spent_before: float = 0.0, free_without_vm: bool = False,
+           startup_allowance_minutes: float = 10.0, max_attempts_without_progress: int | None = 10,
+           max_attempts: int | None = None, deadline: str | None = None,
+           shutdown_reserve_minutes: float = 6.0) -> dict:
+    """The run's limits, checked by the worker at each start after it journaled its preflight (so the newest
+    start in the journal is this one). Spend is an upper bound at the ceiling (the on-demand price):
+    - free_without_vm (the provider bills only while a VM exists): every allocation's alive span plus one
+      progress period, plus the startup allowance before the watchdog started, for each allocation known from
+      the alive files or the journal. An allocation lost before its watchdog started and before any journal
+      entry is not seen. Without readable alive files the bound falls back to the time since submission;
+    - otherwise the time since submission (waiting is billed too).
+    Plus reserved (controller, storage, spend outside the run) and spent_before (an extra amount, normally 0: with
+    submitted_at the run's first submission, earlier jobs of the run are already in the bound). stop_at_utc is when the budget
+    runway, less the shutdown reserve, runs out (or the deadline, if earlier): the worker stops gracefully there.
+    limit names what is reached now: deadline, attempts, no_progress or budget (None: keep training)."""
+    now = time.time() if now is None else now
+    if not ceiling_hourly > 0 or not budget > 0:
+        raise ValueError('ceiling_hourly and budget must be positive')
+    # A start that never trained is not an allocation of its own: one that only put its new VM under the spot price
+    # cap and stopped it, or one a limit stopped before training (so a raised limit is not used up by the stop).
+    runs = [r for r in _starts(read_journal(run_dir))
+            if any(e.get('event') == 'selection' for e in r)
+            or not any((e.get('event') == 'price_cap' and e.get('state') == 'switched') or e.get('event') == 'limit'
+                       for e in r)]
+    allocations = len(runs)
+    without_progress = 0
+    for run in reversed(runs[:-1]):                 # earlier starts in a row that ended without a commit
+        if any(e.get('event') == 'commit' for e in run):
+            break
+        without_progress += 1
+    notes, basis = [], 'since_submission'
+    hours = max(0.0, now - submitted_at) / 3600
+    if free_without_vm:
+        alive, bad = read_alive(run_dir)
+        if alive:
+            # Each allocation ran from its start to the latest of its alive file's last write and its journal
+            # events, plus two progress periods (a write that failed or was still queued behind checkpoint
+            # uploads). An unreadable file counts up to the next allocation's start (or now).
+            times = sorted(_epoch(e['time']) for e in read_journal(run_dir) if 'time' in e)
+            spans = 0.0
+            for run in runs:                            # a start older than every alive file: its journal span
+                when = [_epoch(e['time']) for e in run if 'time' in e]
+                if when and max(when) < alive[0]['start']:
+                    spans += max(when) - min(when) + 2 * 300.0
+            for i, a in enumerate(alive):
+                nxt = alive[i + 1]['start'] if i + 1 < len(alive) else now
+                last = a['last'] if a['last'] is not None else nxt
+                last = max([last] + [t for t in times if a['start'] <= t < nxt])
+                spans += max(0.0, min(last, now) - a['start']) + 2 * a['period_seconds']
+            known = max(len(alive), allocations)
+            hours, basis = (spans + known * startup_allowance_minutes * 60) / 3600, 'allocations'
+            if bad:
+                notes.append(f"alive files unreadable ({', '.join(bad)}): counted up to the next allocation")
+        else:
+            notes.append('no alive files')
+    spend = hours * ceiling_hourly + reserved + spent_before
+    runway_hours = (budget - spend) / ceiling_hourly - shutdown_reserve_minutes / 60
+    stop_at, stop_by = now + max(0.0, runway_hours) * 3600, 'budget'
+    if deadline and _epoch(deadline) <= stop_at:
+        stop_at, stop_by = _epoch(deadline), 'deadline'
+    limit = None
+    if deadline and now >= _epoch(deadline):
+        limit = 'deadline'
+    elif max_attempts is not None and allocations > max_attempts:
+        limit = 'attempts'
+    elif max_attempts_without_progress is not None and without_progress >= max_attempts_without_progress:
+        limit = 'no_progress'
+    elif runway_hours <= 0:
+        limit = 'budget'
+    result = {'limit': limit, 'allocations': allocations, 'allocations_without_progress': without_progress,
+              'spend_upper_usd': round(spend, 2), 'spend_basis': basis, 'budget_usd': budget,
+              'runway_hours': round(max(0.0, runway_hours), 3),
+              'stop_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(stop_at)), 'stop_by': stop_by}
+    if notes:
+        result['notes'] = notes
+    return result
+
+
 def _artifact(run: Path, rel: str) -> dict:
     path = (run / rel).resolve()
     if run.resolve() not in path.parents:
@@ -406,6 +533,9 @@ def finalize(run_dir, run_id, data_version, model_version, world_size, identity,
               'attempt': manifest.get('attempt', NAME.fullmatch(final_dir).group(2)),
               'artifacts': [_artifact(run, a) for a in artifacts], 'skipped': sel['skipped'],
               'finalized_at': _utc()}
+    if (run / 'FINAL.json').exists():
+        raise Blocked(f"FINAL.json already exists (outcome {json.loads((run / 'FINAL.json').read_text()).get('outcome')}): "
+                      'this run is finalized')
     _write_once(run / 'FINAL.json', json.dumps(record, sort_keys=True, indent=1).encode())
     return record
 
@@ -441,6 +571,25 @@ def verify_final(run_dir, run_id, data_version, model_version, world_size, ident
     return {'ok': True, 'outcome': final['outcome'], 'final_step': final['final_step'],
             'final_dir': final['final_dir'], 'artifacts': len(final.get('artifacts', [])),
             'starts': len(order), 'lineage_warnings': lineage_problems([starts[a] for a in order])}
+
+
+def _limits_from_env(args):
+    """The rendered task's limit variables (lifecycle entrypoint contract) in place of the flags."""
+    env = os.environ
+    def num(name):
+        return float(env[name]) if env.get(name, '').strip() else None
+    args.submitted_at = num('CAMPAIGN_SUBMITTED_AT')
+    args.budget, args.ceiling_hourly = num('BUDGET_LIMIT_USD'), num('CEILING_HOURLY_USD')
+    args.reserved = num('BUDGET_RESERVED_USD') or 0.0
+    args.spent_before = num('BUDGET_SPENT_BEFORE_USD') or 0.0
+    args.free_without_vm = env.get('FREE_WITHOUT_VM') == '1'
+    if num('STARTUP_ALLOWANCE_MINUTES') is not None:
+        args.startup_allowance_minutes = num('STARTUP_ALLOWANCE_MINUTES')
+    if num('MAX_ATTEMPTS_WITHOUT_PROGRESS') is not None:
+        args.max_attempts_without_progress = int(num('MAX_ATTEMPTS_WITHOUT_PROGRESS'))
+    if num('MAX_ATTEMPTS') is not None:
+        args.max_attempts = int(num('MAX_ATTEMPTS'))
+    args.deadline = env.get('CAMPAIGN_DEADLINE_UTC') or None
 
 
 def _identity_args(p):
@@ -483,6 +632,23 @@ def main(argv=None):
     q.add_argument('--submitted-at', type=float, help='Unix seconds when the launch command started')
     q.add_argument('--max-memory-fraction', type=float, default=0.9,
                    help='fail when a journaled peak_memory_fraction exceeds this (default 0.9)')
+    lm = sub.add_parser('limits')
+    lm.add_argument('run_dir')
+    lm.add_argument('--submitted-at', type=float, help="Unix seconds the run's first job was submitted")
+    lm.add_argument('--ceiling-hourly', type=float, help='the node on-demand price per hour')
+    lm.add_argument('--budget', type=float, help="the run's total budget")
+    lm.add_argument('--reserved', type=float, default=0.0, help='controller and storage allowance')
+    lm.add_argument('--spent-before', type=float, default=0.0,
+                    help='an extra amount to count (spend outside the run belongs in --reserved)')
+    lm.add_argument('--free-without-vm', action='store_true', help='the provider bills only while a VM exists')
+    lm.add_argument('--startup-allowance-minutes', type=float, default=10.0)
+    lm.add_argument('--max-attempts-without-progress', type=int, default=10)
+    lm.add_argument('--max-attempts', type=int)
+    lm.add_argument('--deadline', help='ISO-8601 UTC ending in Z')
+    lm.add_argument('--shutdown-reserve-minutes', type=float, default=6.0)
+    lm.add_argument('--from-env', action='store_true',
+                    help='read every value above from the rendered task environment (the entrypoint contract)')
+    lm.add_argument('--now', type=float, help=argparse.SUPPRESS)
     f = sub.add_parser('finalize')
     _identity_args(f)
     f.add_argument('--outcome', required=True, choices=OUTCOMES)
@@ -508,6 +674,20 @@ def main(argv=None):
                                    args.watch_summaries, args.eval_scale)
             print(json.dumps(result, sort_keys=True))
             return 0 if result['ok'] else 1
+        elif args.cmd == 'limits':
+            if args.from_env:
+                _limits_from_env(args)
+            if None in (args.submitted_at, args.ceiling_hourly, args.budget):
+                raise ValueError('limits needs --submitted-at, --ceiling-hourly and --budget (or --from-env)')
+            result = limits(args.run_dir, submitted_at=args.submitted_at, ceiling_hourly=args.ceiling_hourly,
+                            budget=args.budget, now=args.now, reserved=args.reserved, spent_before=args.spent_before,
+                            free_without_vm=args.free_without_vm,
+                            startup_allowance_minutes=args.startup_allowance_minutes,
+                            max_attempts_without_progress=args.max_attempts_without_progress,
+                            max_attempts=args.max_attempts, deadline=args.deadline,
+                            shutdown_reserve_minutes=args.shutdown_reserve_minutes)
+            print(json.dumps(result, sort_keys=True))
+            return LIMIT_EXIT if result['limit'] else 0
         elif args.cmd == 'finalize':
             result = finalize(*_identity(args), outcome=args.outcome, target_step=args.target_step,
                               artifacts=args.artifact, mount_root=args.mount_root)

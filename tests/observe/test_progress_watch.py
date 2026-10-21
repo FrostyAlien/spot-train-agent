@@ -355,6 +355,37 @@ class WatchTests(unittest.TestCase):
         time.sleep(0.5)
         self.assertFalse(alive(int(self.mark.read_text())), 'the session-leading grandchild survived')
 
+    def test_the_alive_file_records_this_allocation(self):
+        ckpt = self.dir / 'ckpt'
+        p = self.start('ok', CHECKPOINT_DIR=str(ckpt))
+        out, _ = p.communicate(timeout=30)
+        self.assertEqual(p.returncode, 0, out)
+        files = list((ckpt / 'alive').glob('*.json'))
+        self.assertEqual(len(files), 1, out)
+        rec = json.loads(files[0].read_text())
+        self.assertLessEqual(rec['start'], rec['last'])
+        self.assertEqual(rec['period_seconds'], 300.0)
+        self.assertRegex(files[0].name, r'^\d{8}T\d{6}Z-[A-Za-z0-9.-]+\.json$')
+
+    def test_an_unwritable_alive_file_only_warns(self):
+        blocker = self.dir / 'file-not-dir'
+        blocker.write_text('x')
+        p = self.start('ok', CHECKPOINT_DIR=str(blocker / 'sub'))
+        out, _ = p.communicate(timeout=30)
+        self.assertEqual(p.returncode, 0, out)
+        self.assertEqual(out.count('WATCH-WARN alive file not written'), 1, out)
+
+    def test_a_stall_is_also_notified(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_notify import Sink
+        sink = Sink()
+        self.addCleanup(sink.close)
+        p = self.start('grandchild', NOTIFY_URL=sink.url, EXPERIMENT_RUN_ID='run-a')
+        out, _ = p.communicate(timeout=60)
+        self.assertEqual(p.returncode, pw.STALL_EXIT, out)
+        self.assertEqual(len(sink.posts), 1, out)
+        self.assertRegex(sink.posts[0][2].decode(), r'^\[run-a\] STALL in phase train at step 3 .*exit 93')
+
     def test_no_tick_at_all_ends_at_the_startup_limit(self):
         self.child.write_text('import time; time.sleep(60)')
         p = self.start('x', STALL_LIMITS='startup=1')

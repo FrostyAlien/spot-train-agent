@@ -255,9 +255,13 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(validate(d,'launch'),[])                    # no absolute cap; no-progress limit applies
         d['recovery']['max_attempts_without_progress']=0
         self.assertTrue(validate(d,'launch'))
+        d['recovery']['max_attempts_without_progress']=None   # null is not the default: the worker could not read it
+        self.assertTrue(any('max_attempts_without_progress' in e for e in validate(d,'launch')))
+        d=copy.deepcopy(self.ready); d['recovery']['startup_allowance_minutes']=None
+        self.assertTrue(any('startup_allowance_minutes' in e for e in validate(d,'launch')))
     def test_runway_must_cover_planned_job_time(self):
         d=copy.deepcopy(self.ready); d['budget'].update(total_limit=10,controller_allowance=0.5,ceiling_hourly_usd=4.57,planned_job_hours=2.5)
-        self.assertTrue(any('guard runway' in e for e in validate(d,'launch')))
+        self.assertTrue(any('budget runway' in e for e in validate(d,'launch')))
         d['budget']['total_limit']=15
         self.assertEqual(validate(d,'launch'),[])
     def test_standard_needs_no_max_runtime_hours(self):
@@ -271,15 +275,60 @@ class ContractTests(unittest.TestCase):
             self.assertTrue(validate(d,'launch'))
         d=copy.deepcopy(self.ready); d['budget']['free_without_vm']='yes'
         self.assertTrue(validate(d,'launch'))
-    def test_guard_death_warning(self):
+    def test_spend_the_limits_cannot_see_is_flagged(self):
         from validate_experiment import warnings
-        d=copy.deepcopy(self.ready); d['budget'].update(deadline_utc='2026-10-04T00:00:00Z',total_limit=15,ceiling_hourly_usd=4.57)
-        now=__import__('datetime').datetime(2026,10,3,12,tzinfo=__import__('datetime').timezone.utc).timestamp()
-        self.assertIn('the worker deadline bounds total spend',warnings(d,now)[0])
-        d['budget']['deadline_utc']='2026-10-03T14:00:00Z'
-        self.assertEqual(warnings(d,now),[])
-        d['budget']['deadline_utc']=None                   # no deadline: the runtime timeout per allocation
-        self.assertIn('each allocation after 2.3 h',warnings(d,now)[0])
+        d=copy.deepcopy(self.ready); d['budget']['free_without_vm']=False
+        self.assertIn('without the guard it is counted only at the next start',warnings(d)[0])
+        d['monitoring']['guard']='external'
+        self.assertEqual(warnings(d),[])
+        d['monitoring']['guard']='none'; d['budget']['free_without_vm']=True
+        self.assertEqual(warnings(d),[])
+    def test_server_modes(self):
+        for mode in ('self-hosted','existing','provider-managed','local','existing-host','remote-api-server','standalone-managed'):
+            d=copy.deepcopy(self.ready); d['controller']['mode']=mode
+            self.assertEqual(validate(d,'launch'),[],mode)
+        d=copy.deepcopy(self.ready); d['controller']={'mode':'provider-managed','state_uri':None}
+        self.assertEqual(validate(d,'launch'),[])                   # the provider keeps the server state
+        d['controller']['mode']='self-hosted'
+        self.assertTrue(any('controller.state_uri' in e for e in validate(d,'launch')))
+        d['controller']['mode']='mars'
+        self.assertTrue(any('controller.mode' in e for e in validate(d,'launch')))
+    def test_endpoint_is_the_host_only(self):
+        d=copy.deepcopy(self.ready); d['controller'].update(endpoint='skypilot.example.org:443',server_version='0.14.1')
+        self.assertEqual(validate(d,'launch'),[])
+        for bad in ('https://skypilot.example.org','user:pass@skypilot.example.org','host?token=x'):
+            d['controller']['endpoint']=bad
+            self.assertTrue(any('controller.endpoint' in e for e in validate(d,'launch')),bad)
+    def test_a_server_upgrade_reruns_the_start_checks(self):
+        old=copy.deepcopy(self.ready); old['controller']['server_version']='0.14.0'
+        d=copy.deepcopy(old); d['controller']['server_version']='0.14.1'
+        self.assertTrue(any('server_version changed' in e for e in validate(d,'launch',old)))
+        self.assertEqual(validate(copy.deepcopy(old),'launch',old),[])
+    def test_guard_and_notify_settings(self):
+        d=copy.deepcopy(self.ready); d['monitoring']['guard']='external'; d['monitoring']['notify']={'channel':'ntfy','format':'slack'}
+        self.assertEqual(validate(d,'launch'),[])
+        for key,bad in (('guard','always'),):
+            e=copy.deepcopy(d); e['monitoring'][key]=bad
+            self.assertTrue(any('monitoring.guard' in x for x in validate(e,'launch')))
+        e=copy.deepcopy(d); e['monitoring']['notify']['format']='sms'
+        self.assertTrue(any('notify.format' in x for x in validate(e,'launch')))
+        e=copy.deepcopy(d); e['monitoring']['notify']['url']='https://ntfy.sh/secret'
+        self.assertTrue(any('NOTIFY_URL secret' in x for x in validate(e,'launch')))
+    def test_fallback_without_the_guard_needs_no_timed_wait(self):
+        d=copy.deepcopy(self.ready); d['recovery'].update(allow_on_demand=True,on_demand_fallback={'approved':True},max_capacity_wait_minutes=60)
+        self.assertEqual(validate(d,'launch'),[])
+        d['monitoring']['guard']='external'
+        self.assertTrue(any('after_capacity_wait_minutes' in e for e in validate(d,'launch')))
+        d['recovery']['on_demand_fallback']['after_capacity_wait_minutes']=30
+        self.assertEqual(validate(d,'launch'),[])
+    def test_spot_price_cap(self):
+        d=copy.deepcopy(self.ready); d['budget']['spot_price_cap']={'per_gpu_hour':1.2,'cap_id':'pricingpolicy-e00abc'}
+        self.assertEqual(validate(d,'launch'),[])
+        for bad in ({'per_gpu_hour':0,'cap_id':'x'},{'per_gpu_hour':1.2},{'per_gpu_hour':1.2,'cap_id':'x','url':'y'}):
+            e=copy.deepcopy(d); e['budget']['spot_price_cap']=bad
+            self.assertTrue(any('spot_price_cap' in x for x in validate(e,'launch')),bad)
+        e=copy.deepcopy(d); e['purchase_model']='on-demand'
+        self.assertTrue(any('only to spot' in x for x in validate(e,'launch')))
     def test_watchdog_settings(self):
         d=copy.deepcopy(self.ready)
         d['watchdog']={'k':5,'limits':{'train':240,'eval':900,'save':600,'final':600,'startup':1800},'ceilings':{'final':7200},

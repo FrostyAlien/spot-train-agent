@@ -691,6 +691,17 @@ class FixRoundTests(unittest.TestCase):
                            'controller_allowance': 0.5},
                 'recovery': {'max_attempts': 2, 'max_capacity_wait_minutes': 30, 'planned_drills': 1, **rec}}
 
+    def test_init_config_sets_worker_limits_for_an_external_guard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            m = self.contract(); m['monitoring'] = {'guard': 'external'}
+            out = cg.init_config(m, 4, Path(tmp), notify_cmd=['true'])
+            c = json.loads(Path(out['guard_config']).read_text())
+            self.assertEqual((c['worker_limits'], c['notify_evals']), (True, False))
+        with tempfile.TemporaryDirectory() as tmp:
+            out = cg.init_config(self.contract(), 4, Path(tmp), notify_cmd=['true'])
+            c = json.loads(Path(out['guard_config']).read_text())
+            self.assertEqual((c['worker_limits'], c['notify_evals']), (False, True))
+
     def test_init_config_carries_the_campaign_over(self):
         with tempfile.TemporaryDirectory() as tmp:
             w = Path(tmp)
@@ -812,6 +823,38 @@ class ProgressAndBillingTests(unittest.TestCase):
         _, st = decide(strict, {}, pend, 1000.0)
         _, st = decide(strict, st, pend, 1060.0)
         self.assertAlmostEqual(st['billable_seconds'], 660.0)   # without the rule every second counts
+
+    def test_a_hook_that_finds_no_vm_for_a_running_job_ends_free_waits(self):
+        c = cfg(free_without_vm=True, startup_allowance_minutes=0, max_capacity_wait_minutes=600, budget_usd=100.0)
+        rec_free = {'status': 'RECOVERING', 'recovery_count': 1, 'vms': 0}
+        acts, st = decide(c, {}, {**RUNNING, 'vms_running': 0}, 1000.0)
+        self.assertFalse(st.get('vm_hook_broken'))                   # one empty answer can be a lagging status
+        acts, st = decide(c, st, {**RUNNING, 'vms_running': 0}, 1060.0)
+        self.assertTrue(any(a[0] == 'notify' and 'found no VM for the running job twice' in a[1] for a in acts))
+        self.assertTrue(st['vm_hook_broken'])
+        _, st = decide(c, st, rec_free, 1120.0)
+        _, st = decide(c, st, rec_free, 1180.0)
+        self.assertAlmostEqual(st['billable_seconds'], 180.0)    # the hook is not trusted any more: charged
+        acts, st = decide(c, st, {**RUNNING, 'recovery_count': 2, 'vms_running': 0}, 1240.0)
+        self.assertFalse(any('found no VM' in a[1] for a in acts))  # told once
+        _, st = decide(c, {}, {**RUNNING, 'vms_running': 0}, 1000.0)
+        _, st = decide(c, st, {**RUNNING, 'vms_running': 1}, 1060.0)   # found: the count starts over
+        self.assertEqual((st['vm_zero_reads'], st.get('vm_hook_broken')), (0, None))
+
+    def test_worker_limits_leave_deadline_and_attempts_to_the_worker(self):
+        past = '2000-01-01T00:00:00Z'
+        for worker, expect in ((False, True), (True, False)):
+            c = cfg(worker_limits=worker, deadline_utc=past, max_attempts=1, budget_usd=100.0)
+            acts, _ = decide(c, {}, {'status': 'RUNNING', 'recovery_count': 3}, 1000.0)
+            self.assertEqual(any(a[0] == 'cancel' for a in acts), expect, worker)
+        c = cfg(worker_limits=True, startup_allowance_minutes=0, max_capacity_wait_minutes=5, budget_usd=100.0)
+        history, _ = run(c, [RUNNING] + [{'status': 'RECOVERING', 'recovery_count': 1}] * 8)
+        self.assertTrue(any(a[0] == 'cancel' and 'capacity wait' in a[1] for acts in history for a in acts))
+        c = cfg(worker_limits=True, budget_usd=1.0, max_capacity_wait_minutes=600)
+        history, _ = run(c, [RUNNING] * 30)                          # running: the worker stops it at its runway
+        self.assertFalse(any(a[0] == 'cancel' for acts in history for a in acts))
+        history, _ = run(c, [RUNNING] * 10 + [{'status': 'RECOVERING', 'recovery_count': 1}] * 20)
+        self.assertTrue(any(a[0] == 'cancel' and 'budget' in a[1] for acts in history for a in acts))   # a billed wait
 
     def test_billing_rule_edges_charge_when_a_vm_may_exist(self):
         c = cfg(free_without_vm=True, startup_allowance_minutes=0, max_capacity_wait_minutes=600, budget_usd=100.0)
@@ -978,8 +1021,10 @@ class ProgressAndBillingTests(unittest.TestCase):
             finally:
                 cg.observe_skypilot, cg.read_log, cg.count_vms = original
             st = json.loads(Path(c['state_path']).read_text())
-        self.assertEqual(calls, ['log', 'log', ('vms', 'r1-7')])   # every RUNNING tick: evaluations are forwarded
+        # the VM hook on RUNNING ticks until it finds the VM, the log every RUNNING tick (evaluations are forwarded)
+        self.assertEqual(calls, [('vms', 'r1-7'), 'log', ('vms', 'r1-7'), 'log', ('vms', 'r1-7')])
         self.assertEqual(st['stalled'], 0)
+        self.assertTrue(st['vm_hook_broken'])        # the stub found no VM for the running job, twice
 
     def test_cluster_name_falls_back_to_job_name_and_id(self):
         self.assertEqual(cg.cluster_name({'cluster': 'r1-7-abc', 'name': 'r1'}, 7), 'r1-7-abc')
