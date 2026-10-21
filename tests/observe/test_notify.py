@@ -18,12 +18,13 @@ class Sink:
     """A local HTTP endpoint that records each POST (body, content type) and answers with `status`."""
 
     def __init__(self, status=200):
-        self.posts, outer = [], self
+        self.posts, self.agents, outer = [], [], self
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
                 n = int(self.headers.get('Content-Length', 0))
                 outer.posts.append((self.path, self.headers.get('Content-Type'), self.rfile.read(n)))
+                outer.agents.append(self.headers.get('User-Agent'))
                 self.send_response(status)
                 self.end_headers()
 
@@ -55,6 +56,7 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual((code, out), (0, ''))
         path, kind, body = self.sink.posts[0]
         self.assertEqual(path, '/topic-s3cret')
+        self.assertEqual(self.sink.agents[0], notify.AGENT)
         self.assertTrue(kind.startswith('text/plain'))
         self.assertEqual(body.decode(), '[run-a] resumed from step 12')
 
@@ -89,10 +91,26 @@ class NotifyTests(unittest.TestCase):
         self.assertIn('NOTIFY-WARN', out)
         self.assertNotIn('s3cret', out)
 
+    def test_a_crlf_url_or_a_broken_server_never_crashes_or_leaks(self):
+        code, out = self.run_cli(['x'], NOTIFY_URL=self.sink.url + '\r')
+        self.assertEqual(code, 0)
+        self.assertIn('without spaces or control characters', out)
+        self.assertNotIn('s3cret', out)
+        import socket
+        srv = socket.socket(); srv.bind(('127.0.0.1', 0)); srv.listen(1)
+        self.addCleanup(srv.close)
+        def answer():
+            conn, _ = srv.accept(); conn.recv(65536); conn.sendall(b'NOT HTTP\r\n\r\n'); conn.close()
+        threading.Thread(target=answer, daemon=True).start()
+        code, out = self.run_cli(['x'], NOTIFY_URL=f'http://127.0.0.1:{srv.getsockname()[1]}/hook-s3cret')
+        self.assertEqual(code, 0)
+        self.assertIn('NOTIFY-WARN', out)
+        self.assertNotIn('s3cret', out)
+
     def test_unknown_format_and_non_http_url_are_refused(self):
         self.assertEqual(notify.send('x', url=self.sink.url, fmt='sms')[0], False)
         self.assertEqual(notify.send('x', url='file:///etc/passwd', fmt='text'),
-                         (False, 'NOTIFY_URL must be an http(s) URL'))
+                         (False, 'NOTIFY_URL must be one http(s) URL without spaces or control characters (a CRLF file?)'))
 
 
 if __name__ == '__main__':

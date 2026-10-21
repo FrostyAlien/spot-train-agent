@@ -16,12 +16,14 @@ Every spend figure in a message is an upper bound at the on-demand price; the re
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
 
 FORMATS = ('text', 'slack', 'discord', 'json')
 TIMEOUT = 10.0
+AGENT = 'spot-trainer-notify/1'    # some webhook fronts refuse urllib's default agent
 
 
 def _payload(message: str, fmt: str, event: str, run: str) -> tuple:
@@ -44,21 +46,20 @@ def send(message: str, event: str = 'note', url: str = None, fmt: str = None, ru
         return False, f'NOTIFY_FORMAT must be one of {", ".join(FORMATS)}'
     if not url:
         return False, 'no NOTIFY_URL: not sent'
-    if not url.startswith(('https://', 'http://')):
-        return False, 'NOTIFY_URL must be an http(s) URL'
+    if not url.startswith(('https://', 'http://')) or re.search(r'[\s\x00-\x1f\x7f]', url):
+        return False, 'NOTIFY_URL must be one http(s) URL without spaces or control characters (a CRLF file?)'
     line = f'[{run}] {message}' if run else message
     body, kind = _payload(line, fmt, event, run)
-    req = urllib.request.Request(url, data=body, method='POST', headers={'Content-Type': kind})
     try:
+        req = urllib.request.Request(url, data=body, method='POST', headers={'Content-Type': kind, 'User-Agent': AGENT})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if 200 <= resp.status < 300:
                 return True, 'sent'
             return False, f'HTTP {resp.status}'
     except urllib.error.HTTPError as e:
         return False, f'HTTP {e.code}'
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        reason = getattr(e, 'reason', e)
-        return False, f'{type(e).__name__}: {reason}'.replace(url, '<NOTIFY_URL>')
+    except Exception as e:  # noqa: BLE001 - a notice never stops training; the URL (a secret) is never echoed
+        return False, type(e).__name__
 
 
 def main(argv=None) -> int:

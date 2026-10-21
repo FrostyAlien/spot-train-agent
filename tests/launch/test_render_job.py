@@ -206,17 +206,17 @@ class ExtensionTests(unittest.TestCase):
         m['recovery'].update(max_capacity_wait_minutes=60, startup_allowance_minutes=8, max_attempts_without_progress=6)
         return m
     def test_the_workers_limits_are_rendered_for_the_run_only(self):
-        j = render(self.budgeted(), ['python', 'train.py'], spent_before=3.25)
+        j = render(self.budgeted(), ['python', 'train.py'], campaign_start=1_700_000_000)
         e = j['envs']
-        self.assertEqual((e['BUDGET_LIMIT_USD'], e['BUDGET_RESERVED_USD'], e['BUDGET_SPENT_BEFORE_USD'],
-                          e['CEILING_HOURLY_USD'], e['FREE_WITHOUT_VM'], e['STARTUP_ALLOWANCE_MINUTES'],
-                          e['MAX_ATTEMPTS_WITHOUT_PROGRESS'], e['MAX_ATTEMPTS']),
-                         ('50', '2', '3.25', '4.5', '1', '8', '6', '3'))
-        self.assertTrue(e['CAMPAIGN_SUBMITTED_AT'].isdigit())
+        self.assertEqual((e['BUDGET_LIMIT_USD'], e['BUDGET_RESERVED_USD'], e['CEILING_HOURLY_USD'], e['FREE_WITHOUT_VM'],
+                          e['STARTUP_ALLOWANCE_MINUTES'], e['MAX_ATTEMPTS_WITHOUT_PROGRESS'], e['MAX_ATTEMPTS'],
+                          e['CAMPAIGN_SUBMITTED_AT']),
+                         ('50', '2', '4.5', '1', '8', '6', '3', '1700000000'))   # every job of the run: its first submission
+        self.assertTrue(render(self.budgeted())['envs']['CAMPAIGN_SUBMITTED_AT'].isdigit())   # default: now
         q = render(self.budgeted(), ['python', 'train.py'], variant='qualify', qualify_tag='q1')
         self.assertNotIn('BUDGET_LIMIT_USD', q['envs'])
         self.assertNotIn('BUDGET_LIMIT_USD', render(fixture())['envs'])      # unknown budget: planning only
-        with self.assertRaises(ValueError): render(self.budgeted(), spent_before=-1)
+        with self.assertRaises(ValueError): render(self.budgeted(), campaign_start=-1)
     def test_notification_channel_is_a_required_secret_and_a_format(self):
         m = fixture(); m['monitoring'] = {'notify': {'channel': 'ntfy', 'format': 'slack'}}
         j = render(m, secrets=['WANDB_API_KEY'])

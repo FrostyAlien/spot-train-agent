@@ -40,8 +40,8 @@ the watcher's own CPU time), printed and appended to $HEARTBEAT_DIR/summaries.js
 (cancel, runtime timeout) is passed to the launcher, which gets 60 s. A watchdog error prints one WATCH-ERROR line
 and turns the watchdog off for that start: it never stops a healthy run.
 With $CHECKPOINT_DIR set, the watcher keeps one alive file per allocation on the checkpoint mount,
-$CHECKPOINT_DIR/alive/<start>-<host>.json ({start, last, period_seconds}, epoch seconds), rewritten at start, with
-every PROGRESS line and at exit: the run's limits (checkpoint_marker.py limits) read how long each allocation ran.
+$CHECKPOINT_DIR/alive/<start>-<host>.json ({start, last, period_seconds}, epoch seconds), rewritten at start, every
+PROGRESS_PERIOD_SECONDS (also after a WATCH-ERROR) and at exit: the run's limits (checkpoint_marker.py limits) read how long each allocation ran.
 With $NOTIFY_URL set, a stall is also sent through notify.py next to this file (best effort, 20 s at most).
 A failure of either prints one WATCH-WARN line and changes nothing else.
 """
@@ -77,15 +77,19 @@ class Alive:
         self.path = Path(root) / 'alive' / f'{stamp}-{host}.json' if root else None
 
     def write(self):
+        """Rewrite the file; on failure warn once and try again next time (a mount hiccup must not end it)."""
         if self.path is None:
             return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps({'start': self.start, 'last': time.time(),
                                              'period_seconds': self.period}))
+            self.warned = False
         except OSError as e:
-            print(f'WATCH-WARN alive file not written ({type(e).__name__}): the limits count from the submission', flush=True)
-            self.path = None
+            if not getattr(self, 'warned', False):
+                print(f'WATCH-WARN alive file not written ({type(e).__name__}); retried every period: until a write '
+                      'succeeds, the limits count this allocation from its journal events', flush=True)
+            self.warned = True
 
 
 def _notify(text: str, event: str) -> None:
@@ -410,6 +414,7 @@ def watch(argv: list) -> int:
     started = io_at = t0 = time.monotonic()
     beat = Alive(period)
     beat.write()
+    last_beat = time.monotonic()
     cpu0 = time.process_time()
     quiet_max, io_mb = {}, {}
     proc = subprocess.Popen(argv, start_new_session=True)
@@ -449,7 +454,6 @@ def watch(argv: list) -> int:
                     print(f"PROGRESS {_utc()} step={min((r['step'] for r in live), default=0)} phase={phase} "
                           f"age={now - (oldest['tick'] if oldest else started):.0f} quiet={quiet:.0f}", flush=True)
                     last_progress = now
-                    beat.write()
                 verdict = judge(live, now, max(started, io_at), limits, k, ceilings, ended)
             except Exception as e:  # noqa: BLE001 - a watchdog bug must never stop a healthy run: fail open
                 print(f'WATCH-ERROR {type(e).__name__}: {e}; no stall detection for the rest of this start', flush=True)
@@ -469,6 +473,9 @@ def watch(argv: list) -> int:
                 beat.write()
                 _summary(d, read_ranks(d), stats())
                 return STALL_EXIT
+        if time.monotonic() - last_beat >= period:        # outside the watching block: kept after a WATCH-ERROR
+            beat.write()
+            last_beat = time.monotonic()
         try:
             code = proc.wait(poll)
             break

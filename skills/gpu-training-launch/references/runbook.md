@@ -54,12 +54,13 @@ controller runbook's step 5 checks the server's view of them):
 $P $R /abs/experiment.json --argv-json "$ARGV" --validate-with-skypilot >/dev/null
 $P $R /abs/experiment.json --argv-json "$ARGV" --variant qualify --qualify-tag t1 --validate-with-skypilot > $W/tasks/dryrun.yaml
 sky launch --dryrun -y $W/tasks/dryrun.yaml
-$P $R /abs/experiment.json --argv-json "$ARGV" --scheduling-timeout --validate-with-skypilot >/dev/null 2>&1 &&
-    SCHED=--scheduling-timeout || SCHED=; echo "SCHED=$SCHED"
+if $P $R /abs/experiment.json --argv-json "$ARGV" --scheduling-timeout --validate-with-skypilot >/dev/null 2>$W/sched.log
+then SCHED=--scheduling-timeout; else SCHED=; tail -1 $W/sched.log; fi; echo "SCHED=$SCHED"
 ```
 Check: "Parsed and round-tripped" twice and the dry run prints the chosen resources. `SCHED` records whether this
-SkyPilot version accepts `job.wait_for_scheduling_timeout` (empty: it does not, and nothing bounds the wait for the
-first start except the optional guard; keep `SCHED` for the run). A `sky` command silent
+SkyPilot version accepts `job.wait_for_scheduling_timeout` (empty: it does not, or the contract lacks
+`recovery.max_capacity_wait_minutes`, as the printed line says; then nothing bounds the wait for the first start except
+the optional guard; keep `SCHED` for the run). A `sky` command silent
 for two minutes: read the API server log (controller runbook) before anything else.
 
 ## 1. GPU qualification (once per new stack; inside the approved qualification cap)
@@ -169,8 +170,8 @@ python3 $R /abs/experiment.json --argv-json "$ARGV" $SCHED | python3 -c 'import 
 print({k: v for k, v in e.items() if k.startswith(("BUDGET_", "CEILING_", "MAX_ATTEMPTS", "FREE_", "STARTUP_"))})'
 ```
 Check: `"valid": true` (read any `warnings`: spend the run's limits cannot see); the limits the worker will
-enforce, as rendered. The runway (job time the budget allows at the ceiling) is (total_limit -
-controller_allowance) / ceiling_hourly_usd less 5 minutes; the validator already checked it covers
+enforce, as rendered (*(offline only)*). The runway (job time the budget allows at the ceiling) is (total_limit -
+controller_allowance) / ceiling_hourly_usd less the 6-minute shutdown reserve; the validator already checked it covers
 `budget.planned_job_hours`. Before this, add the spend made outside the run so far (qualification, data,
 control host) to `budget.controller_allowance` and note it in `qualification.json`. With the optional guard
 (`monitoring.guard: external`) also run `$P $G --init-config --contract /abs/experiment.json --job-id 0 --workdir $W
@@ -182,24 +183,26 @@ receives one JSON message on stdin (for example `["curl","-sS","-d","@-","https:
 
 ## 4. Submit (Standard tier), then the optional guard
 A new run revision (new `run_id`) gets a new `$W`; the earlier run's spend is carried in `budget.controller_allowance`.
-First the notification channel (the secrets file holds `NOTIFY_URL`; the message must arrive):
+*(offline only)* Once per notification channel (the first launch, or after the channel changed): the secrets file holds
+`NOTIFY_URL`, and the message must arrive:
 ```bash
-(set -a; . $W/secrets.env; python3 <observe-skill>/scripts/notify.py --strict --event check "notification check for $RUN")
+NOTIFY_URL=$(sed -n 's/^NOTIFY_URL=//p' $W/secrets.env) python3 <observe-skill>/scripts/notify.py --strict --event check "notification check for $RUN"
 ```
-Check: exit 0 and the message arrived where the user reads it. Then submit:
+Check: exit 0 and the message arrived where the user reads it. Then submit (*(offline only)* without the guard):
 ```bash
+[ -f $W/campaign-start ] || date +%s > $W/campaign-start      # the run's first submission, kept for relaunches
 S=$(date -u +%Y%m%dT%H%M%SZ)
-python3 $R /abs/experiment.json --argv-json "$ARGV" --secret WANDB_API_KEY $SCHED --spent-before $SPENT > $W/tasks/$RUN-$S.yaml
+python3 $R /abs/experiment.json --argv-json "$ARGV" --secret WANDB_API_KEY $SCHED --campaign-start "$(cat $W/campaign-start)" > $W/tasks/$RUN-$S.yaml
 sky jobs launch -y -d -n $RUN $W/tasks/$RUN-$S.yaml --secret-file $W/secrets.env && JOB=$(sky jobs queue -o json |
     python3 -c 'import json,sys; print(max(j["job_id"] for j in json.load(sys.stdin) if j["job_name"] == sys.argv[1]))' $RUN)
 echo "job $JOB"; rm $W/secrets.env
 ```
 Check: one integer (job ids only grow, so the newest job named `$RUN` is this one). If the launch failed
 or timed out without an id, do not resubmit: look for the job first (`sky jobs queue -o json`, name `$RUN`,
-recent `submitted_at`). `SPENT` is 0 for the run's first job. For a relaunch of the same run it is 0 when
-`budget.free_without_vm` is true (the run's alive files already count every allocation), otherwise the earlier
-job's last `spend_upper_usd` from the journal's `limits` events (`checkpoint_marker.py journal-show`). The worker
-now enforces the run's limits and notifies; continue with the observe runbook. The rest of this section is only
+recent `submitted_at`). Every job of the run renders with the same `$W/campaign-start`, so the worker's spend bound
+covers earlier jobs and the gaps between them (with `budget.free_without_vm`, the run's alive files count every
+allocation instead). Spend outside the run (qualification, data, control host, earlier run revisions) is counted once,
+in `budget.controller_allowance`. The worker now enforces the run's limits and notifies; continue with the observe runbook. The rest of this section is only
 for the optional guard (`monitoring.guard: external`); before the submission above, its dry run must then say ok:
 ```bash
 $P $G --init-config --contract /abs/experiment.json --job-id 0 --workdir $W --notify-cmd '<json argv>' --dry-run | grep -q '"runway_hours"' || { echo "guard config refused: fix it before submitting"; exit 1; }

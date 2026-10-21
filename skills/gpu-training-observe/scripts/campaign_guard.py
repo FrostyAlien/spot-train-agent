@@ -297,10 +297,14 @@ def decide(cfg: dict, state: dict, obs: dict | None, now: float) -> tuple[list, 
     submitted = (obs or {}).get('submitted_at')
     first_obs = obs is not None and not s['observed']
     two_jobs = s.get('replaced_job') is not None or s.get('double_charge_once', False)
-    if obs is not None and obs.get('vms_running') == 0 and not s.get('vm_hook_broken'):
-        s['vm_hook_broken'] = True                     # a running job has a VM: the hook or the name is wrong
-        actions.append(('notify', 'the VM hook found no VM for the running job: waiting is charged from now on; '
-                                  'check the hook and the cluster name'))
+    if obs is not None and obs.get('vms_running') is not None:
+        # A running job has a VM: two empty answers on separate ticks mean the hook or the name is wrong (one could
+        # be a VM deleted while the job status still lags).
+        s['vm_zero_reads'] = s.get('vm_zero_reads', 0) + 1 if obs['vms_running'] == 0 else 0
+        if s['vm_zero_reads'] >= 2 and not s.get('vm_hook_broken'):
+            s['vm_hook_broken'] = True
+            actions.append(('notify', 'the VM hook found no VM for the running job twice: waiting is charged from now '
+                                      'on; check the hook and the cluster name'))
     free_now = _free(cfg, obs, s) and not two_jobs     # a replaced primary may hold a VM: never free then
     if first_obs:                                      # charge from submission, not from the guard's start,
         s['observed'] = True                           # even when the first ticks were blind; skip only when
@@ -368,7 +372,9 @@ def decide(cfg: dict, state: dict, obs: dict | None, now: float) -> tuple[list, 
     worker = cfg.get('worker_limits', False)           # the worker enforces deadline and attempts at every start
     if not worker and cfg.get('deadline_utc') is not None and now >= parse_utc(cfg['deadline_utc']):
         reasons.append('campaign deadline reached')
-    if spend + hourly * _reserve_hours(cfg) >= cfg['budget_usd']:
+    # With worker_limits the worker stops a RUNNING job gracefully at its budget runway; the guard's outside count
+    # stops the job only while it waits (a billed wait the worker cannot see), so the two do not race.
+    if (not worker or status != 'RUNNING') and spend + hourly * _reserve_hours(cfg) >= cfg['budget_usd']:
         reasons.append(f'spend upper bound {spend:.2f} + shutdown reserve reaches budget {cfg["budget_usd"]}')
     if not worker and cfg.get('max_attempts') is not None and s.get('attempts', 1) > cfg['max_attempts']:
         reasons.append(f"attempts {s['attempts']} exceed {cfg['max_attempts']}")
@@ -760,10 +766,12 @@ def _tick(cfg, path) -> list:
         rc = int(obs.get('recovery_count') or 0)
         if (cfg.get('free_without_vm') and cfg.get('vm_count_cmd') and status == 'RUNNING'
                 and state.get('vm_checked_rc') != rc and not state.get('vm_hook_broken')):
-            # Once per allocation: the hook must find the running job's VM, or every wait would count as free.
+            # Per allocation until the hook finds the running job's VM, or every wait would count as free.
             vms = count_vms(cfg['vm_count_cmd'], cluster_name(obs, state['job_id']))
             if vms is not None:
-                obs['vms_running'], state['vm_checked_rc'] = vms, rc
+                obs['vms_running'] = vms
+                if vms > 0:
+                    state['vm_checked_rc'] = rc
         # Read the log on every RUNNING tick (commits, evaluations, the watchdog's lines), and only then: for
         # a job in any other non-terminal state this SkyPilot's tail_logs(follow=False) waits for it to run
         # again and never returns.

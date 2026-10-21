@@ -4,7 +4,7 @@
   render_job.py experiment.json --argv-json '[...]' [--variant V] [--secret NAME ...] > task.yaml
   render_job.py experiment.json --secret NAME ... --check-secret-file /abs/secrets.env
   render_job.py experiment.json --argv-json '[...]' --validate-with-skypilot      (start checks only)
-  [--spent-before USD]          primary/fallback: the upper bound of earlier jobs of the run (the worker's limits)
+  [--campaign-start EPOCH]      primary/fallback: Unix seconds the run's first job was submitted (the worker's limits)
   [--scheduling-timeout]        primary/fallback: add job.wait_for_scheduling_timeout (only where the chosen
                                 SkyPilot accepts it: the start checks' round trip decides)
 
@@ -67,7 +67,8 @@ def secret_names(m, secrets=()):
     registry-login variables (SkyPilot needs them together, all as secrets)."""
     names = list(secrets)
     mon = m.get('monitoring') if isinstance(m.get('monitoring'), dict) else {}
-    if isinstance(mon.get('notify'), dict) and m.get('tier', 'standard') != 'minimal' and 'NOTIFY_URL' not in names:
+    channel = mon.get('notify', {}).get('channel') if isinstance(mon.get('notify'), dict) else None
+    if isinstance(channel, str) and channel.strip() and m.get('tier', 'standard') != 'minimal' and 'NOTIFY_URL' not in names:
         names.append('NOTIFY_URL')
     if isinstance(m.get('image'), dict) and m['image'].get('registry_login') is True:
         names += [n for n in DOCKER_LOGIN if n not in names]
@@ -157,7 +158,7 @@ def watchdog_env(m, qualify_seconds=None) -> dict:
 
 
 def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeout_minutes=20, helpers=None,
-           cpu_region=None, eval_scale=None, spent_before=0.0, scheduling_timeout=False):
+           cpu_region=None, eval_scale=None, campaign_start=None, scheduling_timeout=False):
     """variant: primary (the managed job), on-demand-fallback (the guard's pre-approved task), a
     qualification run on a plain self-bounded cluster (qualify: the real GPUs, fresh then resume, a few
     steps each, measurements; rehearsal: the optional CPU fallback, the same image and buckets, wiring
@@ -166,7 +167,8 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
     run's prefix. secrets: names only, exported as SECRET_NAMES; values come at launch (--secret-file).
     helpers: local copies mounted at /opt/gpu-skills for the verify task, which runs without the image.
     eval_scale (qualification): the full eval set over the subset's, passed to journal-check.
-    spent_before (primary, fallback): the upper bound of earlier jobs of the run, for the worker's limits.
+    campaign_start (primary, fallback): Unix seconds the run's first job was submitted (default now), so the worker's
+    time-based spend bound covers every job of the run and the gaps between them.
     scheduling_timeout (primary, fallback): add SkyPilot's job.wait_for_scheduling_timeout (first start only)."""
     def require(condition, message):
         if not condition:
@@ -380,12 +382,12 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
     total, ceiling = budget.get('total_limit'), budget.get('ceiling_hourly_usd')
     if tier == 'standard' and variant in ('primary', 'on-demand-fallback') and total is not None and ceiling:
         # The run's limits, checked by the worker at every start (recover skill: checkpoint_marker.py limits).
-        require(type(spent_before) in (int, float) and math.isfinite(spent_before) and spent_before >= 0,
-                'spent_before must be a finite nonnegative amount')
+        start = int(time.time()) if campaign_start is None else campaign_start
+        require(type(start) in (int, float) and math.isfinite(start) and 0 < start <= time.time() + 60,
+                'campaign_start must be the Unix seconds of the run\'s first submission')
         no_progress = rec.get('max_attempts_without_progress', 10)
-        envs.update(CAMPAIGN_SUBMITTED_AT=str(int(time.time())), BUDGET_LIMIT_USD=str(total),
-                    BUDGET_RESERVED_USD=str(budget.get('controller_allowance') or 0),
-                    BUDGET_SPENT_BEFORE_USD=str(spent_before), CEILING_HOURLY_USD=str(ceiling),
+        envs.update(CAMPAIGN_SUBMITTED_AT=str(int(start)), BUDGET_LIMIT_USD=str(total),
+                    BUDGET_RESERVED_USD=str(budget.get('controller_allowance') or 0), CEILING_HOURLY_USD=str(ceiling),
                     FREE_WITHOUT_VM='1' if budget.get('free_without_vm') is True else '0',
                     STARTUP_ALLOWANCE_MINUTES=str(rec.get('startup_allowance_minutes', 10)),
                     MAX_ATTEMPTS_WITHOUT_PROGRESS=str(no_progress))
@@ -395,6 +397,8 @@ def render(m, argv=None, variant='primary', secrets=(), qualify_tag=None, timeou
     if isinstance(cap, dict) and use_spot and variant == 'primary':
         require(isinstance(cap.get('cap_id'), str) and re.fullmatch(r'[A-Za-z0-9_.:/-]{1,200}', cap['cap_id']),
                 'budget.spot_price_cap.cap_id must be the provider object ID')
+        # Only FAILOVER restarts the stopped VM; any other strategy replaces it, so the cap would never hold.
+        require(strategy == 'FAILOVER', 'spot_price_cap needs FAILOVER recovery: one region and no ordered fallback')
         envs['PRICE_CAP_ID'] = cap['cap_id']       # the worker caps its own VM (provider hook hook_price_cap)
     watch_env = watchdog_env(m, timeout_minutes * 60 if variant in QUALIFY else None) if variant != 'verify' else {}
     watch = f'python3 {WATCHER} watch -- ' if watch_env else ''      # wraps the launcher (observe skill)
@@ -582,8 +586,8 @@ def main():
                    'does not evaluate)')
     p.add_argument('--cpu-region', help='rehearsal/verify: a region of the provider with CPU-only quota '
                                         '(for example the control host region)')
-    p.add_argument('--spent-before', type=float, default=0.0,
-                   help="primary/fallback: upper bound of earlier jobs of this run (the worker's limits)")
+    p.add_argument('--campaign-start', type=float,
+                   help="primary/fallback: Unix seconds the run's first job was submitted (default: now)")
     p.add_argument('--scheduling-timeout', action='store_true',
                    help="primary/fallback: add SkyPilot's job.wait_for_scheduling_timeout (if the chosen version accepts it)")
     p.add_argument('--check-secret-file', metavar='PATH',
@@ -601,7 +605,7 @@ def main():
         argv = json.loads(args.argv_json) if args.argv_json else None
         helpers = default_helpers() if args.variant == 'verify' else None
         result = render(m, argv, args.variant, args.secret, args.qualify_tag, args.timeout_minutes, helpers,
-                        args.cpu_region, args.eval_scale, args.spent_before, args.scheduling_timeout)
+                        args.cpu_region, args.eval_scale, args.campaign_start, args.scheduling_timeout)
         if args.validate_with_skypilot:
             # SkyPilot may print to stdout while it loads (a catalog refresh writes progress records):
             # keep stdout for the rendered task only.

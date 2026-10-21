@@ -151,6 +151,12 @@ def validate(d, phase='plan', locked=None):
             err('budget.spot_price_cap must be {per_gpu_hour > 0, cap_id: the provider object ID}')
         elif d.get('purchase_model') not in (None,'spot'):
             err('budget.spot_price_cap applies only to spot runs')
+        else:
+            mon=d.get('monitoring') if isinstance(d.get('monitoring'),dict) else {}
+            rec=d.get('recovery') if isinstance(d.get('recovery'),dict) else {}
+            if rec.get('allow_region_change') or (rec.get('allow_on_demand') and mon.get('guard','none')=='none'):
+                err('budget.spot_price_cap needs FAILOVER recovery (one region, no ordered on-demand fallback): '
+                    'any other strategy replaces the stopped VM, so the cap would never hold')
     if d['budget'].get('planned_job_hours') is not None: number('budget.planned_job_hours',positive=True)
     code=d.get('code')
     if code is not None and not isinstance(code,dict): err('code must be an object {repo, commit}')
@@ -293,6 +299,8 @@ def validate(d, phase='plan', locked=None):
             old_ctl=locked.get('controller') if isinstance(locked.get('controller'),dict) else {}
             if old_ctl.get('server_version') is not None and ctl.get('server_version')!=old_ctl['server_version']:
                 err('controller.server_version changed: rerun the start checks (requalify only if the release notes touch recovery)')
+            if old_ctl.get('endpoint') is not None and ctl.get('endpoint')!=old_ctl['endpoint']:
+                err('controller.endpoint changed: a different server is a new review (start checks, jobs, credentials)')
     return errors
 
 def warnings(d, now=None):

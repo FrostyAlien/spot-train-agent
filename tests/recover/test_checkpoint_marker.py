@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 SCRIPTS = SKILL / 'scripts'
@@ -216,7 +217,7 @@ class MarkerTests(unittest.TestCase):
         self.assertFalse((self.run / 'FINAL.json').exists())
         final = self.finalize(outcome='completed', target_step=200)
         self.assertEqual((final['final_step'], final['outcome']), (200, 'completed'))
-        with self.assertRaises(FileExistsError):                        # written once
+        with self.assertRaisesRegex(cm.Blocked, 'already exists .outcome completed'):   # written once
             self.finalize(outcome='completed', target_step=200)
 
     def test_finalize_records_artifacts_and_deadline_outcome(self):
@@ -522,16 +523,16 @@ class LimitsTests(unittest.TestCase):
         self.assertIsNone(r['limit'])
         self.assertEqual(r['spend_basis'], 'since_submission')
         self.assertEqual(r['spend_upper_usd'], 4.0)                    # 2 h x 2 USD
-        self.assertAlmostEqual(r['runway_hours'], 3 - 5 / 60, places=3)  # (10 - 4) / 2, less the shutdown reserve
+        self.assertAlmostEqual(r['runway_hours'], 3 - 6 / 60, places=3)  # (10 - 4) / 2, less the shutdown reserve
         stop = cm._epoch(r['stop_at_utc'])
-        self.assertAlmostEqual(stop, self.NOW + (3 - 5 / 60) * 3600, delta=1)
+        self.assertAlmostEqual(stop, self.NOW + (3 - 6 / 60) * 3600, delta=1)
 
     def test_reserved_and_earlier_jobs_count(self):
         self.start('a1')
         r = self.limits(reserved=1.0, spent_before=4.5)
         self.assertEqual(r['spend_upper_usd'], 9.5)
-        self.assertIsNone(r['limit'])                                  # 15 min left, more than the 5 min reserve
-        self.assertAlmostEqual(r['runway_hours'], 0.25 - 5 / 60, places=3)
+        self.assertIsNone(r['limit'])                                  # 15 min left, more than the 6 min reserve
+        self.assertAlmostEqual(r['runway_hours'], 0.25 - 6 / 60, places=3)
         self.assertEqual(self.limits(reserved=1.0, spent_before=4.9)['limit'], 'budget')   # 3 min left
 
     def test_budget_reached_exits_5_on_the_cli(self):
@@ -550,18 +551,57 @@ class LimitsTests(unittest.TestCase):
         self.alive('a2', self.NOW - 600, self.NOW - 60)                 # this allocation
         r = self.limits(free_without_vm=True, submitted_at=self.NOW - 20 * 3600)
         self.assertEqual(r['spend_basis'], 'allocations')
-        # spans 1800 + 540 s, plus a period of 300 s each, plus 10 min of startup per allocation
-        hours = (1800 + 540 + 2 * 300 + 2 * 600) / 3600
+        # spans 1800 + 540 s, plus two periods of 300 s each, plus 10 min of startup per allocation
+        hours = (1800 + 540 + 4 * 300 + 2 * 600) / 3600
         self.assertAlmostEqual(r['spend_upper_usd'], round(hours * 2, 2), places=2)
         self.assertIsNone(r['limit'])                                  # 20 h of waiting is free
 
-    def test_unreadable_alive_files_fall_back_to_the_time_since_submission(self):
+    def test_an_unreadable_alive_file_counts_up_to_the_next_allocation(self):
         self.start('a1')
-        (self.run / 'alive').mkdir()
-        (self.run / 'alive' / 'a1.json').write_text('{"start": ')
+        d = self.run / 'alive'
+        d.mkdir()
+        first = self.NOW - 3 * 3600
+        name = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(first)) + '-host.json'
+        (d / name).write_text('{"start": ')                             # upload cut off
+        self.alive('b', self.NOW - 3600, self.NOW - 60)
+        r = self.limits(free_without_vm=True, submitted_at=self.NOW - 30 * 3600)
+        self.assertEqual(r['spend_basis'], 'allocations')
+        self.assertIn('counted up to the next allocation', r['notes'][0])
+        hours = (2 * 3600 + 3540 + 4 * 300 + 2 * 600) / 3600              # 2 h up to the next start, then 59 min
+        self.assertAlmostEqual(r['spend_upper_usd'], round(hours * 2, 2), places=2)
+
+    def test_journal_events_extend_a_stale_alive_file(self):
+        self.alive('a1', self.NOW - 5 * 3600, self.NOW - 5 * 3600 + 60)    # its writes stopped after a minute
+        cm.journal(self.run, 'a1', 'preflight')
+        rec = json.loads(next((self.run / 'journal' / 'a1').glob('*.json')).read_text())
+        t = cm._epoch(rec['time'])
+        r = cm.limits(self.run, submitted_at=t - 7200, ceiling_hourly=2.0, budget=100.0, now=t + 10,
+                      free_without_vm=True, startup_allowance_minutes=0)
+        # the journal's event (now) is later than the alive file's last write: the allocation ran until then
+        self.assertGreaterEqual(r['spend_upper_usd'], round((t - (self.NOW - 5 * 3600)) / 3600 * 2, 2))
+
+    def test_no_alive_files_fall_back_to_the_time_since_submission(self):
+        self.start('a1')
         r = self.limits(free_without_vm=True)
-        self.assertEqual(r['spend_basis'], 'since_submission')
-        self.assertIn('alive files unreadable (a1.json)', r['notes'])
+        self.assertEqual((r['spend_basis'], r['notes']), ('since_submission', ['no alive files']))
+
+    def test_a_deadline_without_seconds_is_accepted(self):
+        self.start('a1')
+        soon = time.strftime('%Y-%m-%dT%H:%MZ', time.gmtime(self.NOW + 3600))
+        self.assertEqual(self.limits(deadline=soon)['stop_at_utc'][:16], soon[:16])
+
+    def test_limits_from_the_rendered_environment(self):
+        self.start('a1')
+        env = {'CAMPAIGN_SUBMITTED_AT': str(int(self.NOW - 2 * 3600)), 'BUDGET_LIMIT_USD': '10', 'CEILING_HOURLY_USD': '2',
+               'BUDGET_RESERVED_USD': '0', 'FREE_WITHOUT_VM': '0', 'STARTUP_ALLOWANCE_MINUTES': '10',
+               'MAX_ATTEMPTS_WITHOUT_PROGRESS': '10'}
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out):
+            code = cm.main(['limits', str(self.run), '--from-env', '--now', str(self.NOW)])
+        r = json.loads(out.getvalue())
+        self.assertEqual((code, r['spend_upper_usd'], r['spend_basis']), (0, 4.0, 'since_submission'))
+        with mock.patch.dict(os.environ, {**env, 'FREE_WITHOUT_VM': '0'}), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cm.main(['limits', str(self.run), '--now', str(self.NOW)]), 1)   # no values given
 
     def test_allocations_without_progress_in_a_row(self):
         self.start('a1', commit=True)
