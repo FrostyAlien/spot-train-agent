@@ -1,6 +1,6 @@
 Research checked: 2026-10-01 UTC. Design guidance; verify APIs against the project’s pinned versions.
 
-Contents: 1. Dataset lifecycle and interface, 3. Exactly one owner of data advancement (streamed data)
+Contents: [1. Dataset lifecycle and interface](#1-dataset-lifecycle-and-interface) ([durable truth](#durable-truth), [prepare before GPU allocation](#prepare-before-gpu-allocation), [launch readiness evidence](#launch-readiness-evidence), [cache rules](#cache-rules)); [3. Exactly one owner of data advancement](#3-exactly-one-owner-of-data-advancement) ([streamed data](#primary-reference-for-streamed-data))
 
 ## 1. Dataset lifecycle and interface
 
