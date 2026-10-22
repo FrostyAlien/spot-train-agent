@@ -4,14 +4,14 @@ Items marked *(offline only)* have not run in a live test yet (`VALIDATION.md`).
 
 ## Campaign guard
 Attach the guard when the contract's `monitoring.guard` is `external`. The worker already enforces the run's
-budget, deadline and attempt limits (recover
-`references/contract.md#4-crash-safe-checkpoint-publication-on-a-skypilot-bucket-mount`, item 6) and sends the
+budget, deadline and attempt limits (recover `references/contract.md#the-runs-limits`) and sends the
 notices. The guard adds what no worker can see: waiting for capacity after a preemption, the spend of a billed wait,
 a timed on-demand fallback, a wedged VM and notices while no VM exists.
 
 With `external`, `--init-config` leaves the deadline, the attempt limits and the evaluation notices to the worker,
-so those fields below stay inactive in the guard, and the guard cancels at the budget only while the job waits
-(internals: the `worker_limits` paragraph of the `scripts/campaign_guard.py` docstring). Whichever limit comes
+so those fields below stay inactive in the guard, with one exception: a timed fallback that would exceed
+`max_attempts` is refused, and the guard cancels instead. The guard cancels at the budget only while the job
+waits (internals: the `worker_limits` paragraph of the `scripts/campaign_guard.py` docstring). Whichever limit comes
 first stops the run.
 
 - **Host:** `scripts/campaign_guard.py` runs on the control host, or without one on a machine that stays awake and
@@ -90,13 +90,12 @@ that has gone silent: no rank ticked and its processes moved no bytes for longer
 force. Default quiet limits: 3 minutes in training, 10 in an evaluation, a save or end-of-training work, 30
 before the first tick. The mechanism (byte thresholds, limits that follow the step gaps, the dumps) is in the
 script's docstring.
-- **Lines:** a stall prints one `STALL` line and every rank's stack, then exits 93 (triage: [runbook](runbook.md#triage-a-job-that-did-not-succeed),
-  row 93). A `PROGRESS` line comes every 5 minutes. A collective timeout shorter than the quiet limit ends a
+- **Lines:** a stall prints one `STALL` line and every rank's stack, then exits 93 (the stall row of the [triage table](runbook.md#triage-a-job-that-did-not-succeed)). A `PROGRESS` line comes every 5 minutes. A collective timeout shorter than the quiet limit ends a
   collective hang first (exit 1 or 134).
 - **From the worker itself:** with the notification secret (`NOTIFY_URL`, `NOTIFY_FORMAT`) the stall is sent through
   `scripts/notify.py` before the stop. With `CHECKPOINT_DIR` set, the watchdog also keeps this allocation's alive
   file on the checkpoint mount (rewritten with every `PROGRESS` line), which the run's limits read (recover
-  `references/contract.md#4-crash-safe-checkpoint-publication-on-a-skypilot-bucket-mount`, item 6).
+  `references/contract.md#the-runs-limits`).
 - **Guard:** it notifies the `STALL` line when a tick reads it in time (otherwise `job terminal: FAILED`).
   *(offline only)* A RUNNING job whose readable log has no `PROGRESS` line for three periods (the VM or the watchdog
   froze) is notified as "wedged" and cancelled after `wedged_grace_minutes` (15). An unreadable log is only notified.

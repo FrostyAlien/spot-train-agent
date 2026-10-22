@@ -79,10 +79,10 @@ python3 <skill-dir>/scripts/gpu_preflight.py coverage --arch-list "<recorded lis
 Native coverage means reuse the image; PTX-only means expect a slower first start and requalify; unsupported means build a new image for that GPU and requalify, with the user's approval. Check the host CPU platform too. A GPU change never happens inside a running experiment.
 
 ## Stack qualification checklist
-Qualify the reusable stack once on already authorized resources: actual CUDA forward/backward, custom kernels, collectives, loader throughput, durable checkpoint commit and fresh-process restore, and metrics-run continuation when history is ahead of the checkpoint. Record exact versions, architecture and tested integration outside the worker. Rerun full qualification after major changes to these interfaces or dependencies, not for every experiment using the same stack.
+Qualify the reusable stack once on already authorized resources: actual CUDA forward/backward, custom kernels, collectives, loader throughput, durable checkpoint commit and fresh-process restore, and metrics-run continuation when history is ahead of the checkpoint. Record exact versions, architecture and tested integration outside the worker. An experiment on the same stack reuses the qualification; when to qualify again: `gpu-training-lifecycle` → `references/operating-model.md#qualify-a-new-stack-once`.
 
 ## Job-start preflight and deeper diagnostics
-Every allocation runs the probe before data download or training:
+The entrypoint runs the probe on every allocation, before data download or training (lifecycle `references/entrypoint.md#pseudo-code`):
 ```bash
 python3 <skill-dir>/scripts/gpu_preflight.py probe --expected-gpus N --expected-platform <locked-platform> [--min-free-gb PATH=GB]
 ```

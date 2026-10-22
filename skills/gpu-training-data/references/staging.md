@@ -2,8 +2,8 @@
 
 ## Get data into durable storage without a big disk
 A machine that moves a dataset needs disk for the work in progress, not for the dataset. Present the
-options that fit, with a recommendation; **the user decides, and without an answer copy into the
-provider's bucket** (A or B). Run the copy on a CPU machine near the bucket (the control host, or without one a short-lived CPU VM launched
+options that fit, with a recommendation (the SKILL's staging step sets the default; a copy into the bucket
+is A or B). Run the copy on a CPU machine near the bucket (the control host, or without one a short-lived CPU VM launched
 through the user's SkyPilot in the bucket's region, as the image runbook's build VM, deleted afterwards), never on a
 rented GPU.
 

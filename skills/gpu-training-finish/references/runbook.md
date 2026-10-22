@@ -1,18 +1,18 @@
 # Finish runbook
 
 On the control host (or, without one, the operator's machine) in bash after the run's last job ended, with the pinned client's `sky` (launch `references/runbook.md`),
-`R=<launch-skill>/scripts/render_job.py`, `G=<observe-skill>/scripts/campaign_guard.py`, `P=~/sky-venv/bin/python`
-(the guard imports SkyPilot), `ST=<controller-skill>/scripts/stage.sh`, `W=~/campaign/<run_id>`
+`R=<launch-skill>/scripts/render_job.py`, and, when the guard ran, `G=<observe-skill>/scripts/campaign_guard.py` and `P=~/sky-venv/bin/python`
+(the guard imports SkyPilot); `ST=<controller-skill>/scripts/stage.sh`, `W=~/campaign/<run_id>`
 (the run's campaign directory, launch `references/runbook.md`). Nothing here deletes
 anything; retention is the user's decision. Steps marked *(offline only)* have not run in a live test yet; the rest ran live (`VALIDATION.md`).
 
-## 1. Every job is terminal and its guard is closed
+## 1. Every job is terminal, and its guard closed when one ran
 ```bash
 sky jobs queue -o json | python3 -c 'import json,sys; [print(r["job_id"], r["status"]) for r in json.load(sys.stdin) if r["job_name"]==sys.argv[1]]' $RUN
-for j in <job ids>; do $P $G --close-job --workdir $W --job-id $j; done
+for j in <job ids>; do $P $G --close-job --workdir $W --job-id $j; done   # only when the guard ran
 ```
-Check: only terminal statuses, and every job reports `closed` (a job the guard cannot observe needs
-`--reason`). Stop guard units that are still active: `systemctl is-active campaign-guard-<job> && sudo systemctl stop campaign-guard-<job>`.
+Check: only terminal statuses. When the guard ran, every job reports `closed` (a job the guard cannot observe needs
+`--reason`), and its units are stopped when still active: `systemctl is-active campaign-guard-<job> && sudo systemctl stop campaign-guard-<job>`.
 
 ## 2. Verify FINAL.json against the bucket (CPU, cents)
 ```bash
@@ -91,7 +91,14 @@ for d in <prunable dirs>; do bash -c 'source "$1"; hook_storage_delete "$2"' _ /
 ```
 Never delete the final checkpoint or FINAL.json's artifacts.
 
-Spend: report the last guard ledger's `spend_upper_usd` (each ledger includes earlier jobs) as what it is,
-an upper bound at the on-demand price; the real cost comes from the provider's bill when it arrives.
+### Spend
+Report each spend figure as what it is, an upper bound at the on-demand price; the real cost comes from the
+provider's bill when it arrives.
+- **The worker's limits (Standard tier):** the newest `limits` event in the `FINISH-JOURNAL` lineage
+  (`journal-show`) holds `spend_upper_usd`, the bound up to that worker start. The last allocation's time after it
+  (to its last journal event) adds to it at the on-demand price.
+- **The guard, when one ran:** the last guard ledger's `spend_upper_usd` (each ledger includes earlier jobs),
+  counted up to the guard's last poll of the job.
+- A Minimal-tier run without the guard kept no bound: take the cost from the provider's metered usage.
 
 Then write the closure report ([closure.md](closure.md)).

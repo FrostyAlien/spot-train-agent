@@ -7,7 +7,8 @@ worker can see: waiting for capacity after a preemption, the spend of billed wai
 a wedged VM and notices while no VM exists.
 worker_limits (set to true by --init-config when the contract's monitoring.guard is external, which is how the
 guard is attached) splits the work with the worker: the guard skips its deadline_utc, max_attempts and
-max_attempts_without_progress checks (the worker enforces them at every start); it cancels at the budget only
+max_attempts_without_progress checks (the worker enforces them at every start), except that it still refuses
+the timed fallback, and cancels instead, when the fallback would exceed max_attempts; it cancels at the budget only
 while the job is not RUNNING (a billed wait the worker cannot see), because the worker stops a RUNNING job
 gracefully at its budget runway and the two must not race; and --init-config sets notify_evals to false, since
 the worker sends the evaluations. The capacity wait, the fallback, the wedge check,

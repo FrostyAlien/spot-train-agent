@@ -82,8 +82,9 @@ Check: a `repo@sha256:...` digest; record it as `image.reference` and `image.dig
 (and `image.registry_login: true` for a private registry). `docker buildx imagetools inspect <digest ref>`
 resolves it from the registry.
 
-Reuse the digest across runs and recoveries; rebuild only when code or dependencies change, then requalify
-(launch runbook: the qualification task).
+Reuse the digest across runs and recoveries; rebuild only when code or dependencies change, then qualify
+again (the launch skill's qualification task) when `gpu-training-lifecycle` →
+`references/operating-model.md#qualify-a-new-stack-once` calls for it.
 
 ## 5. Local test on the user's GPU (optional) *(offline only)*
 When the user has a machine with an NVIDIA GPU, Docker and the NVIDIA container toolkit, and wants to, run

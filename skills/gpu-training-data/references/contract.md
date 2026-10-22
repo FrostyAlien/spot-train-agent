@@ -42,7 +42,7 @@ Do not infer dataset identity from an HF cache fingerprint alone. The contract i
 
 On CPU-capable preparation infrastructure or the user's existing workstation: resolve immutable sources, check licenses/access, tokenize and pack, validate schema/sample lengths, produce ordered shard inventory and checksums, measure compressed/uncompressed size, verify sufficient scratch/RAM, and publish the manifest only after outputs verify. GPU startup receives a completed manifest; it should not discover that a multi-hour preprocessing job or multi-terabyte download is required.
 
-Reuse a completed immutable dataset version when source/preprocessing contracts match. Qualify loader resume behavior once per reusable stack; still validate each new manifest, schema and preprocessing configuration. Full sequence-continuity tests repeat after major loader/preprocessing/framework/topology changes, while each attempt performs only quick access, integrity and cache-readiness checks. Version changes never justify skipping dataset-specific validation.
+Reuse a completed immutable dataset version when source/preprocessing contracts match. Qualify loader resume behavior once per reusable stack; still validate each new manifest, schema and preprocessing configuration. Full sequence-continuity tests repeat when the stack is qualified again (`gpu-training-lifecycle` → `references/operating-model.md#qualify-a-new-stack-once`; a loader or preprocessing change counts as a data adapter change), while each attempt performs only quick access, integrity and cache-readiness checks. Version changes never justify skipping dataset-specific validation.
 
 Select one access plan (mount mode) before launch: [staging](staging.md#which-storage-for-what).
 

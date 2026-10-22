@@ -1,6 +1,6 @@
 Research checked: 2026-10-01 UTC. Design guidance; verify APIs against the project’s pinned versions.
 
-Contents: [primary-source findings](#primary-source-findings-that-constrain-the-design); [checkpoint content and boundaries](#2-training-checkpoint-content-and-boundaries); [crash-safe publication on a bucket mount](#4-crash-safe-checkpoint-publication-on-a-skypilot-bucket-mount) (layout and alive files, commit, journal, the run's limits); [checkpoint size, path and save interval](#checkpoint-size-path-and-save-interval); [fail-closed restore and retry](#5-fail-closed-restore-and-retry-contract); [compatibility limits](#6-compatibility-and-reproducibility-limits); [offline acceptance tests](#8-offline-test-plan-and-acceptance-criteria); [resume qualification](#resume-qualification); [worker replacement](#worker-replacement).
+Contents: [primary-source findings](#primary-source-findings-that-constrain-the-design); [checkpoint content and boundaries](#2-training-checkpoint-content-and-boundaries); [crash-safe publication on a bucket mount](#4-crash-safe-checkpoint-publication-on-a-skypilot-bucket-mount) (layout and alive files, commit); [journal and final record](#journal-and-final-record); [the run's limits](#the-runs-limits); [checkpoint size, path and save interval](#checkpoint-size-path-and-save-interval); [fail-closed restore and retry](#5-fail-closed-restore-and-retry-contract); [compatibility limits](#6-compatibility-and-reproducibility-limits); [offline acceptance tests](#8-offline-test-plan-and-acceptance-criteria) ([continuation](#continuation-tests), [data position](#data-position-tests), [compatibility, failure and finalization](#compatibility-failure-and-finalization-tests)); [resume qualification](#resume-qualification); [worker replacement](#worker-replacement).
 
 ## Primary-source findings that constrain the design
 
@@ -43,7 +43,7 @@ alive/<start>-<host>.json                  one alive file per allocation (below)
 FINAL.json                                 written once at the end by `finalize`
 ```
 
-An **alive file** is the stall watchdog's record that one allocation (one worker start on a VM) was alive: `alive/<start>-<host>.json` holds `{start, last, period_seconds}` in epoch seconds. The watchdog (`gpu-training-observe` → `scripts/progress_watch.py`) rewrites it at start, every progress period and at exit. The run's limits (item 6) read the alive files to learn how long each allocation ran.
+An **alive file** is the stall watchdog's record that one allocation (one worker start on a VM) was alive: `alive/<start>-<host>.json` holds `{start, last, period_seconds}` in epoch seconds. The watchdog (`gpu-training-observe` → `scripts/progress_watch.py`) rewrites it at start, every progress period and at exit. [The run's limits](#the-runs-limits) read the alive files to learn how long each allocation ran.
 
 `<attempt>` is a tag the container entrypoint sets once per worker start (for example `CHECKPOINT_ATTEMPT=$(date -u +%Y%m%dT%H%M%SZ)`) and passes to every rank. A replacement that re-trains to a step its predecessor saved but never committed writes a new directory instead of reusing a partial one; when the same step is committed twice, the newest attempt wins.
 
@@ -55,21 +55,22 @@ An **alive file** is the stall watchdog's record that one allocation (one worker
    - A stopped VM that SkyPilot restarts keeps its upload cache and resumes pending uploads, so its listing can briefly show a checkpoint that is not yet in the bucket; that checkpoint is complete on disk and safe to restore.
 4. Never delete checkpoints from the training worker: `commit()` returns while uploads of the newest checkpoints may still be queued, and deleting an older directory through the mount removes it from the bucket immediately. Keep everything during the run, or prune from outside the worker with `checkpoint_marker.py prune-list` (the finish runbook's pruning; usable during a long run too), and at finish keep the final and referenced best checkpoints. Directories without a marker are interrupted saves; `prune-list` includes the old ones.
 
-5. **Journal and final record.**
-   - **Journal:** the entrypoint's wrapper (preflight, selection) and rank 0 (commits, finish) record each worker start's events with `checkpoint_marker.py journal $CHECKPOINT_DIR --attempt $CHECKPOINT_ATTEMPT --event <preflight|limits|limit|price_cap|selection|commit|save_skipped|eval|finish> [--field k=v]`. `sky jobs logs` returns only the last attempt, so the journal is the durable lineage of every attempt (read it with `journal-show`).
-   - **Final record:** at the end, inside the worker after the last commit, rank 0 runs `finalize` with the outcome (`completed` with `--target-step`, `deadline_stopped` or `stopped`) and `--artifact` for every extra file the user needs at finish (best model, exported metrics). Those files must already be on the mount: only the resume state is otherwise durable, so a best model kept on the worker's disk is lost when a replacement takes over.
-   - The finish stage checks the record with `verify-final` against the bucket.
-
-6. **The run's limits, from inside the worker.** At each start, after the preflight is journaled, the wrapper runs `checkpoint_marker.py limits $CHECKPOINT_DIR --from-env`.
-   - **Reads:** the rendered budget values (lifecycle `references/entrypoint.md#inputs`); the journal (allocations, and those in a row that ended without a commit); and the alive files. Each allocation counts as running to the latest of its alive file and its journal events, plus two progress periods.
-   - **Prints:** the spend upper bound and `stop_at_utc`, the time the budget runway ends (or the deadline, if earlier).
-   - **Exit 5:** a limit (budget, attempts, allocations without progress or the deadline) is reached now. The wrapper journals `limit` and exits 0 without training. Any other nonzero exit blocks the start with exit 3, so the worker never trains unbounded.
-   - **Exit 0:** no limit yet. The worker trains until `stop_at_utc` and stops there gracefully, like a deadline (exit 0, a journal `limit` event).
-   - **What is final:** only the deadline also writes FINAL.json (`deadline_stopped`). A budget, attempt or no-progress stop is not final: after the user approves a raised limit, a relaunch under the same run id resumes.
-
-   Every stop exits 0, the only code that ends a managed job without a restart whatever `max_restarts_on_errors` is. The bound counts waiting without a VM as free only with `--free-without-vm` and readable alive files. An allocation lost before its watchdog started is not seen, so the optional campaign guard stays the stricter outside count.
-
 One writer: a SkyPilot managed job runs one worker at a time, so no fencing, attempt records or pointer files are needed. Setups with several writers can still have a coordinator accept each commit and use the verifier's `--accepted-record` check ([verifier](verifier.md#optional-coordinator-acceptance-record-multi-writer-setups-only)). Keep provider, region/access plan, GPU count and backend fixed for a run; replacement selection is not permission to migrate scientific conditions.
+
+### Journal and final record
+- **Journal:** the entrypoint's wrapper (preflight, selection) and rank 0 (commits, finish) record each worker start's events with `checkpoint_marker.py journal $CHECKPOINT_DIR --attempt $CHECKPOINT_ATTEMPT --event <preflight|limits|limit|price_cap|selection|commit|save_skipped|eval|finish> [--field k=v]`. `sky jobs logs` returns only the last attempt, so the journal is the durable lineage of every attempt (read it with `journal-show`).
+- **Final record:** at the end, inside the worker after the last commit, rank 0 runs `finalize` with the outcome (`completed` with `--target-step`, `deadline_stopped` or `stopped`) and `--artifact` for every extra file the user needs at finish (best model, exported metrics). Those files must already be on the mount: only the resume state is otherwise durable, so a best model kept on the worker's disk is lost when a replacement takes over.
+- The finish stage checks the record with `verify-final` against the bucket.
+
+### The run's limits
+The worker checks them itself. At each start, after the preflight is journaled, the wrapper runs `checkpoint_marker.py limits $CHECKPOINT_DIR --from-env`.
+- **Reads:** the rendered budget values (lifecycle `references/entrypoint.md#inputs`); the journal (allocations, and those in a row that ended without a commit); and the [alive files](#4-crash-safe-checkpoint-publication-on-a-skypilot-bucket-mount). Each allocation counts as running to the latest of its alive file and its journal events, plus two progress periods.
+- **Prints:** the spend upper bound and `stop_at_utc`, the time the budget runway ends (or the deadline, if earlier).
+- **Exit 5:** a limit (budget, attempts, allocations without progress or the deadline) is reached now. The wrapper journals `limit` and exits 0 without training. Any other nonzero exit blocks the start with exit 3, so the worker never trains unbounded.
+- **Exit 0:** no limit yet. The worker trains until `stop_at_utc` and stops there gracefully, like a deadline (exit 0, a journal `limit` event).
+- **What is final:** only the deadline also writes FINAL.json (`deadline_stopped`). A budget, attempt or no-progress stop is not final: after the user approves a raised limit, a relaunch under the same run id resumes.
+
+Every stop exits 0, the only code that ends a managed job without a restart whatever `max_restarts_on_errors` is. The bound counts waiting without a VM as free only with `--free-without-vm` and readable alive files. An allocation lost before its watchdog started is not seen, so the optional campaign guard stays the stricter outside count.
 
 ### Checkpoint size, path and save interval
 The checkpoint mount (`MOUNT_CACHED`) writes each file to a cache on the boot disk and uploads it about a second after it is closed. SkyPilot caps the cache at 10 GB by default, but only uploaded files are evicted. The disk fills only when checkpoints are written faster than they upload, or one does not fit. Uploads are usually fast enough. Keep free disk of at least 1.25 x checkpoint + 10 GB on top of the image and data (`gpu-training-data` → `references/staging.md#disk-budget`); the entrypoint skips a save when space is short (`gpu-training-lifecycle` → `references/entrypoint.md#pseudo-code`). When a checkpoint exceeds about half of the free disk, or saves come faster than uploads finish, switch the project to one of:
@@ -93,7 +94,7 @@ Restore algorithm:
 5. Report `RESTORE_VERIFIED(step, manifest_digest, attempt)` before the first training update; controller rejects a fresh-start report for a required resume
 6. Publish future checkpoints by the same protocol; completion requires a committed final checkpoint and final run marker, not only process exit 0
 
-A positively missing/incomplete/checksum-corrupt candidate may be skipped only under the declared `latest-complete` policy after the failure has been classified. Unsupported state, wrong dataset/topology or a semantic backend load failure (e.g. a load that returns no path) blocks the attempt; do not silently downgrade scientific compatibility. Never use `except: train_from_scratch()`. A transient network failure may retry the same restore with bounded backoff and then stop. No eligible verified checkpoint after expected progress means blocked recovery, not a new run. An incompatible config/code requires a new run/fork, not automatic mutation to make it load.
+A positively missing/incomplete/checksum-corrupt candidate may be skipped only under the declared `latest-complete` policy after the failure has been classified. Unsupported state, wrong dataset/topology, an authorization or unknown-inventory failure, or a semantic backend load failure (e.g. a load that returns no path) blocks the attempt, and a deterministic restore failure is never retried; do not silently downgrade scientific compatibility. Never use `except: train_from_scratch()`. A transient network failure may retry the same restore with bounded backoff and then stop. No eligible verified checkpoint after expected progress means blocked recovery, not a new run. An incompatible config/code requires a new run/fork, not automatic mutation to make it load.
 
 Before the first checkpoint exists, mark the run explicitly `UNINITIALIZED`; restarting from step zero is the same unprogressed run only under a declared policy. Once a checkpoint has committed, loss of access is not evidence that none existed.
 
@@ -109,22 +110,28 @@ Frameworks do not guarantee identical results across releases/platforms or even 
 
 ## 8. Offline test plan and acceptance criteria
 
-Adapter acceptance tests. A local directory stands in for the mounted bucket; CPU processes (e.g. Gloo) can exercise rank-aware contracts. They test the adapter, not SkyPilot's upload ordering, the provider's durability or GPU kernels; GPU acceptance is the qualification task. The helpers' own tests (commit, selection, verifier) are in the bundle repository, not installed. Items 3–5 test the data-position rules (`gpu-training-data` → `references/contract.md#3-exactly-one-owner-of-data-advancement`).
+Adapter acceptance tests. A local directory stands in for the mounted bucket; CPU processes (e.g. Gloo) can exercise rank-aware contracts. They test the adapter, not SkyPilot's upload ordering, the provider's durability or GPU kernels; GPU acceptance is the qualification task. The helpers' own tests (commit, selection, verifier) are in the bundle repository, not installed.
 
-1. **Baseline interrupted continuation:** train a tiny deterministic dropout model on numbered samples for N updates; separately stop at K, persist complete state, instantiate a new process and resume. Compare weights, optimizer moments, scheduler/LR, RNG draws, sample IDs and counters at N
-2. **Accumulation boundary:** interrupt each microstep. Only a completed update is eligible to commit; replay of uncommitted work produces the baseline result
-3. **Streaming with workers:** 0 and 2 workers, shard rollover, partial batches and packing leftovers, epoch resets. Verify exact next sample sequence where the adapter promises it
-4. **Double-skip trap:** save a nonzero cursor and deliberately enable framework skip; test must detect missing sample IDs and reject this configuration
-5. **Shuffle limitation:** show that a stream whose shuffle buffer is not saved (e.g. HF streaming `.shuffle()`) diverges on resume; the exact-continuity capability flag cannot be set for that adapter without replacement buffering logic
-6. **Compatibility:** change data/tokenizer/config/image/backend/world size/worker count. Reject unsupported resume before updates rather than adapting silently
-7. **Disk/network failures:** insufficient scratch, permission errors, transient outage, checksum discrepancy and backend `None` return all produce structured failure, bounded retry where appropriate, never fresh training
-8. **Log lineage:** replayed metrics retain step/attempt identity and do not masquerade as new unique optimizer progress
-9. **Finalization:** process exit alone leaves run non-complete; FINAL becomes valid only after the final committed checkpoint verifies
+### Continuation tests
+- **Baseline interrupted continuation:** train a tiny deterministic dropout model on numbered samples for N updates; separately stop at K, persist complete state, instantiate a new process and resume. Compare weights, optimizer moments, scheduler/LR, RNG draws, sample IDs and counters at N
+- **Accumulation boundary:** interrupt each microstep. Only a completed update is eligible to commit; replay of uncommitted work produces the baseline result
+
+### Data-position tests
+They test the data-position rules (`gpu-training-data` → `references/contract.md#3-exactly-one-owner-of-data-advancement`).
+- **Streaming with workers:** 0 and 2 workers, shard rollover, partial batches and packing leftovers, epoch resets. Verify exact next sample sequence where the adapter promises it
+- **Double-skip trap:** save a nonzero cursor and deliberately enable framework skip; test must detect missing sample IDs and reject this configuration
+- **Shuffle limitation:** show that a stream whose shuffle buffer is not saved (e.g. HF streaming `.shuffle()`) diverges on resume; the exact-continuity capability flag cannot be set for that adapter without replacement buffering logic
+
+### Compatibility, failure and finalization tests
+- **Compatibility:** change data/tokenizer/config/image/backend/world size/worker count. Reject unsupported resume before updates rather than adapting silently
+- **Disk/network failures:** insufficient scratch, permission errors, transient outage, checksum discrepancy and backend `None` return all produce structured failure, bounded retry where appropriate, never fresh training
+- **Log lineage:** replayed metrics retain step/attempt identity and do not masquerade as new unique optimizer progress
+- **Finalization:** process exit alone leaves run non-complete; FINAL becomes valid only after the final committed checkpoint verifies
 
 Deliver a machine-readable resume-test report with tested software tuple, adapter capability (`stateful_recovery`, `exact_data_continuity`, `bitwise_continuation`), pass/fail evidence, and known exclusions. No installable skill should promise an untested capability.
 
 ## Resume qualification
-Qualify resume once per stack (image, framework, checkpoint store, provider) with the launch skill's GPU qualification task: the entrypoint runs fresh, then resumes from its own commit, on the real GPUs and the real bucket mount. Offline CPU tests do not prove GPU/provider behavior. Requalify for material stack changes or regressions, not routine deployment. Normal attempts reuse the image and run quick identity/access/device checks plus the mandatory restore verification before updates; never skip restore integrity to save time.
+Qualify resume once per stack (image, framework, checkpoint store, provider) with the launch skill's GPU qualification task: the entrypoint runs fresh, then resumes from its own commit, on the real GPUs and the real bucket mount. Offline CPU tests do not prove GPU/provider behavior. When to requalify: `gpu-training-lifecycle` → `references/operating-model.md#qualify-a-new-stack-once`. Normal attempts reuse the image and run quick identity/access/device checks plus the mandatory restore verification before updates; never skip restore integrity to save time.
 
 ## Worker replacement
 A Managed Jobs recovery may restart the same stopped VM (providers that stop rather than delete preempted VMs) or create a new one; record instance IDs and report which happened. The worker boot disk is never checkpoint truth: SkyPilot deletes it when it falls back to a new VM, and on cancel/down.
