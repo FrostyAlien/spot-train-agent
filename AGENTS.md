@@ -49,21 +49,21 @@ The core rule for skill text. The agent loads each level only when it needs it, 
 | Level | Holds | Size |
 |---|---|---|
 | `description` | what the skill does, then "Use when ..."; third person, specific, no negations | <= 60 words |
-| `SKILL.md` body | the decisions: each step's action and the rule that governs it, the gates (money, deletion, secrets) in bold with a one-clause why, costly gotchas | ~500-800 words; never over 500 lines |
+| `SKILL.md` body | the decisions: each step's action and the rule that governs it, the gates (money, deletion, secrets) in bold with a one-clause why, costly gotchas | ~500-800 words (the entry skill, `gpu-training-lifecycle`, up to ~1,000 for its routing table); never over 500 lines |
 | `references/` | the how: commands, checks, contracts, examples; one file per situation (a stage, a variant, a rare case), split by when it is read, not by length | table of contents when over 100 lines |
 | `scripts/` | the mechanism; text gives the command and its check, never the internals | `--help` |
 
 - **Placement:** a detail goes at the highest level where leaving it out would cause a wrong action before the agent reaches the level below.
 - **Steps start with a verb** after their bold label; a step is an action, not a list of nouns.
-- **Pointers name their trigger,** at the step where it happens: "Read `references/x.md` before <action>: it holds <contents>." A step's pointer reaches every section that governs its choice, by anchor. Every file in `references/` is listed in its skill's `SKILL.md` this way (`tests/test_links.py` enforces the listing). References name a SKILL step by its label ("the SKILL's approval step"), never by number.
+- **Pointers name their trigger,** at the step where it happens: "Read `references/x.md` before <action>: it holds <contents>." A step's pointer reaches every section that governs its choice, by anchor; a step that nothing below governs needs no pointer. Every file in `references/` is listed in its skill's `SKILL.md` this way (`tests/test_links.py` enforces the listing). Name a step by its label ("the SKILL's approval step"), never by step, item, row or § number; give anything that is pointed to a heading.
 - **One level deep:** `SKILL.md` links every file a task needs. A reference points elsewhere only to where a shared fact lives, by anchor.
-- **When moving a section down,** keep its one governing sentence in `SKILL.md` with the pointer.
-- **Each fact lives once;** elsewhere, point to it. The one exception: a gate may be restated in one line at the command it guards.
+- **When moving a section down,** keep its one governing sentence in `SKILL.md` with the pointer; the reference then holds the how, not that sentence again.
+- **Each fact lives once;** elsewhere, point to it. A reference elaborates a SKILL gate; it never copies it. Two exceptions, each one line: a gate restated at the command it guards, and a cross-skill gate that every skill needs when it loads alone (read the working rules first; no secrets in chat). Other gates live in full in the skill that owns them.
 
 ## Writing skill text
 
 - `SKILL.md` frontmatter has `name` (the directory name) and `description`. Sections: Inputs, Steps, Outputs, Gates, References.
-- Cross-skill pointers use `` `gpu-xxx` → `references/name.md#anchor` `` or the short form ``lifecycle `references/name.md` ``; links and anchors must resolve (also checked by `tests/test_links.py`). Pointers by step number ("§4") are not checked, so prefer anchors.
+- Cross-skill pointers use `` `gpu-xxx` → `references/name.md#anchor` `` or the short form ``lifecycle `references/name.md` ``; links and anchors must resolve (also checked by `tests/test_links.py`). Pointers by number are not checked, which is one more reason to use anchors.
 - When moving text, check nothing was lost.
 - Follow the `skill-creator` guide and Anthropic's example skills: explain why instead of stacking MUSTs; no stacked conditions or over-specification.
 - Plain, short sentences. Say what to do, then the condition. Commands appear exactly as they run.
