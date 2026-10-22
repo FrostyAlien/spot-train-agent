@@ -31,6 +31,7 @@ The run journal and FINAL.json on the mount; after a recovery, a report: restore
 
 ## Gates
 - **Restore only a committed checkpoint that verifies with matching identities and supported compatibility:** a directory without `COMMITTED.json` is an interrupted save, never a candidate.
+- **Load strictly:** a load that reports missing or unexpected keys is a failed restore (`blocked:`, exit 3), never a warning to continue past, because training on would silently change the model.
 - **Use an older checkpoint only if newer ones are positively missing, incomplete or checksum-corrupt,** and log the skips and lost steps; every other failure blocks ([restore contract](references/contract.md#5-fail-closed-restore-and-retry-contract)). Never start fresh after a restore error: that throws away trained progress.
 - **Never fabricate payloads:** a model-only export is not recovery, and a verifier pass proves integrity only.
 - **Never delete checkpoints from the training worker:** uploads of the newest ones may still be queued. Prune from outside, once newer ones verify in the bucket.
