@@ -82,5 +82,10 @@ class CostTests(unittest.TestCase):
         d = fixture(); d['offers'].append(copy.deepcopy(d['offers'][0]))
         with self.assertRaises(ValueError): compare(d)
 
+    def test_help(self):
+        import subprocess
+        r = subprocess.run([_sys.executable, str(SKILL / 'scripts' / 'compare_costs.py'), '--help'], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0); self.assertIn('usage: compare_costs.py quotes.json', r.stdout)
+
 
 if __name__ == '__main__': unittest.main()

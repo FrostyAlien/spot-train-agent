@@ -100,6 +100,9 @@ def reject_constant(value):
 
 
 def main():
+    if sys.argv[1:] in (['-h'], ['--help']):
+        print(__doc__.strip() + '\nusage: compare_costs.py quotes.json')
+        return
     if len(sys.argv) != 2:
         raise ValueError('usage: compare_costs.py quotes.json')
     with Path(sys.argv[1]).open('rb') as handle:
