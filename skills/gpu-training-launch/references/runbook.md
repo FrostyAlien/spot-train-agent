@@ -51,7 +51,7 @@ Check: no `MISSING` line; otherwise adapt that command from this version's `--he
 renderer's round trip with the installed SkyPilot (`$P`) for the primary task and the
 qualification task, then a dry run of the qualification task through the API server (it proves the server answers, is not stale and
 finds the resources; no VM is created; a dry run does not touch file mounts on the server, so the
-controller runbook's step 5 checks the server's view of them):
+controller runbook's [API server step](../../gpu-training-controller/references/runbook.md#5-api-server-consolidated-managed-jobs-control) checks the server's view of them):
 ```bash
 $P $R /abs/experiment.json --argv-json "$ARGV" --validate-with-skypilot >/dev/null
 $P $R /abs/experiment.json --argv-json "$ARGV" --variant qualify --qualify-tag t1 --validate-with-skypilot > $W/tasks/dryrun.yaml
@@ -66,7 +66,7 @@ value for the run. A `sky` command silent
 for two minutes: read the API server log (controller runbook) before anything else.
 
 ## 1. GPU qualification (once per new stack; inside the approved qualification cap)
-Before it, in the image on CPU: the exact `ARGV` parsed by the framework's own parser (image runbook step 3).
+Before it, in the image on CPU: the exact `ARGV` parsed by the framework's own parser ([image runbook](../../gpu-training-image/references/runbook.md#3-build-detached)).
 When the staged full data differs from its source (samples dropped or fixed, at staging or later), also load its
 index or split metadata there with the project's own loader: the split sizes it reports must equal the manifest's
 counts. The qualification reads only the subset, so it cannot catch a mismatch in the full data.
@@ -248,7 +248,7 @@ re-reads the secrets when it fires.
 Relaunch after a failure: the earlier job must be terminal (with the guard, its ledger done:
 `$P $G --close-job --workdir $W --job-id <old job>`). Recompute `budget.controller_allowance` from what was spent
 outside the run since the last launch (fix-loop qualifications, the control host's hours); the runway shrinks by
-it. The worker's limits read the run's journal and alive files, so attempts carry over by themselves; with the
+it. The worker's limits read the run's journal and [alive files](../../gpu-training-recover/references/contract.md#4-crash-safe-checkpoint-publication-on-a-skypilot-bucket-mount), so attempts carry over by themselves; with the
 guard, `--init-config` carries the earlier job's spend bound and attempts into the new guard and refuses when no
 attempt is left.
 
