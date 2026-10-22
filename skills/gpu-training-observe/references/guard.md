@@ -1,21 +1,28 @@
 # Campaign guard and stall watchdog
+Contents: [Campaign guard](#campaign-guard); [Stall watchdog](#stall-watchdog).
 Items marked *(offline only)* have not run in a live test yet (`VALIDATION.md`).
 
 ## Campaign guard
-Optional since v0.10: the worker enforces the run's budget, deadline and attempt limits itself (recover
+Attach the guard when the contract's `monitoring.guard` is `external`. The worker already enforces the run's
+budget, deadline and attempt limits (recover
 `references/contract.md#4-crash-safe-checkpoint-publication-on-a-skypilot-bucket-mount`, item 6) and sends the
-notices. Attach the guard when the contract's `monitoring.guard` is `external`: it adds what no worker can see,
-waiting for capacity after a preemption, the spend of a billed wait, a timed on-demand fallback, a wedged VM and
-notices while no VM exists. `--init-config` then sets `worker_limits`: the guard leaves the deadline and the attempt
-limits to the worker and keeps its outside spend count, the capacity wait, the fallback and the wedge check, and it
-does not forward evaluations (the worker does). Whichever limit comes first stops the run.
+notices. The guard adds what no worker can see: waiting for capacity after a preemption, the spend of a billed wait,
+a timed on-demand fallback, a wedged VM and notices while no VM exists.
 
-`scripts/campaign_guard.py` runs on the control host, or without one on a machine that stays awake and online for
-the whole campaign (else a small CPU VM): `--loop` under systemd (launch runbook §4), or a cron/systemd timer with
-`--once`. It looks the job up by id across SkyPilot users, so it works from its own host.
+With `external`, `--init-config` leaves the deadline, the attempt limits and the evaluation notices to the worker,
+so those fields below stay inactive in the guard, and the guard cancels at the budget only while the job waits
+(internals: the `worker_limits` paragraph of the `scripts/campaign_guard.py` docstring). Whichever limit comes
+first stops the run.
+
+- **Host:** `scripts/campaign_guard.py` runs on the control host, or without one on a machine that stays awake and
+  online ([operating model](../../gpu-training-lifecycle/references/operating-model.md#operating-model-where-things-run-and-what-runs-them)), independent of the GPU worker. It uses the submitter's
+  SkyPilot API server in the same active workspace as the job, with a login allowed to cancel it, and looks the job
+  up by id across SkyPilot users, so it works from its own host. Run it as `--loop` under systemd
+  (`gpu-training-launch` → `references/runbook.md#4-submit-standard-tier-then-the-optional-guard`), or as a
+  cron/systemd timer with `--once`.
 - **Config:** `--init-config` writes the config from the contract and the campaign ledger (`campaign.json`);
   `--dry-run` prints the runway for the approval. The fields:
-  - `deadline_utc`: optional, none by default (the budget is the hard stop); when set, the guard cancels at it.
+  - `deadline_utc`: optional, none by default (the budget is the hard stop); when set, the run stops at it.
   - `max_attempts_without_progress` (default 10): stops a run whose allocations keep ending without a new
     checkpoint. The guard reads the job log for the `CHECKPOINT_COMMITTED` line while an allocation runs. An
     unreadable log never counts against the run; a commit in the last poll interval before a preemption can be
@@ -53,7 +60,7 @@ the whole campaign (else a small CPU VM): `--loop` under systemd (launch runbook
   persists the ledger, runs one tick at a time (file lock) and notifies once per event. Each tick prints one
   observation line (status, attempts, wait, spend bound); status changes go to the ledger's `history`. With
   `notify_milestones` (default on) the user hears when the job is running, recovering and running again, so nobody
-  polls. With `notify_evals` (default on) the guard reads the log on every RUNNING tick (the last 4000 lines) and
+  polls. With `notify_evals` (default on; off when `--init-config` leaves the evaluations to the worker) the guard reads the log on every RUNNING tick (the last 4000 lines) and
   forwards the newest `EVAL step=<n> {...}` line, each step once.
 - **Relaunch:** `--init-config` refuses a relaunch when earlier jobs used every allowed attempt. `--close-job` closes
   a terminal job's ledger (an unobservable one only with a person's `--reason`).
@@ -83,7 +90,7 @@ that has gone silent: no rank ticked and its processes moved no bytes for longer
 force. Default quiet limits: 3 minutes in training, 10 in an evaluation, a save or end-of-training work, 30
 before the first tick. The mechanism (byte thresholds, limits that follow the step gaps, the dumps) is in the
 script's docstring.
-- **Lines:** a stall prints one `STALL` line and every rank's stack, then exits 93 (triage: [runbook](runbook.md),
+- **Lines:** a stall prints one `STALL` line and every rank's stack, then exits 93 (triage: [runbook](runbook.md#triage-a-job-that-did-not-succeed),
   row 93). A `PROGRESS` line comes every 5 minutes. A collective timeout shorter than the quiet limit ends a
   collective hang first (exit 1 or 134).
 - **From the worker itself:** with the notification secret (`NOTIFY_URL`, `NOTIFY_FORMAT`) the stall is sent through

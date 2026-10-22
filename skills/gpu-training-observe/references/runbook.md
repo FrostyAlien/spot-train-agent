@@ -20,19 +20,23 @@ next_event $JOB <step> <seconds>
 # the end (follows the log until the job is terminal; keep the log as evidence)
 mkdir -p $W/logs; sky jobs logs --tail 0 $JOB > $W/logs/job$JOB.log 2>&1
 ```
-The planned evaluations (planned metric reports in a project without an evaluation) are the waits: the first
-evaluation, then the first after about 25 %, 50 % and 75 % of the target steps, then the end. Call `next_event` with the step before the planned evaluation (0
-for the first) and a timeout of 1.5 x its expected time from now (from the qualification report:
-`step_seconds` x the steps to go, plus one evaluation, plus the startup allowance after a recovery). The
-worker sends every evaluation to the user as it comes; the agent judges only at the planned evaluations.
-At each return: judge the training (below) and send the user two lines, the step with the metrics against
-the expectation and the rate against the qualification, then the spend upper bound (at the on-demand price:
-the worker's latest `limits` event, or the guard's last tick when it runs) and the next planned evaluation;
-then re-arm. At the first planned evaluation, compare the measured step time with the
-qualification's `step_seconds` (the subset can read faster than the full data: page cache, smaller files). When
-they differ by more than 25 %, send the user the new expected end (steps to go x the measured step time) and its
-cost bound: the step count can still change then. A timeout is itself an event: the step stopped advancing or slowed. Read the status and the log
-tail before deciding anything. A `STALL` line means the stall watchdog stopped a hung run (triage below).
+- **The waits** are the planned evaluations (planned metric reports in a project without an evaluation): the
+  first evaluation, then the first after about 25 %, 50 % and 75 % of the target steps, then the end. Call
+  `next_event` with the step before the planned evaluation (0 for the first) and a timeout of 1.5 x its expected
+  time from now (from the qualification report: `step_seconds` x the steps to go, plus one evaluation, plus the
+  startup allowance after a recovery). The worker sends every evaluation to the user as it comes; the agent judges
+  only at the planned evaluations.
+- **At each return:** judge the training (below) and send the user two lines, the step with the metrics against
+  the expectation and the rate against the qualification, then the spend upper bound (at the on-demand price: the
+  worker's latest `limits` event, or the guard's last tick when it runs) and the next planned evaluation; then
+  re-arm.
+- **At the first planned evaluation,** compare the measured step time with the qualification's `step_seconds` (the
+  subset can read faster than the full data: page cache, smaller files). When they differ by more than 25 %, send
+  the user the new expected end (steps to go x the measured step time) and its cost bound: the step count can
+  still change then.
+- **A timeout is itself an event:** the step stopped advancing or slowed. Read the status and the log tail before
+  deciding anything. A `STALL` line means the stall watchdog stopped a hung run (triage below).
+
 Status and the worker's spend bound at any time:
 ```bash
 sky jobs queue -v -o json | python3 -c 'import json,sys; j=next(r for r in json.load(sys.stdin) if r["job_id"]==int(sys.argv[1])); print(j["status"], "recoveries:", j.get("recovery_count"), "cluster:", j.get("current_cluster_name"), j.get("failure_reason") or "")' $JOB
@@ -52,8 +56,8 @@ or the journal's `eval` events) and judge them with what you know
 about this kind of model: the loss continues after a recovery instead of jumping back
 towards its starting value; evaluation improves over epochs; the learning-rate schedule continues; no NaN,
 divergence or stall; throughput near the qualification measurement. Report what you see to the user, with
-the numbers; a suspicious sign (slow but progressing, a non-finite loss) is a notification, not a fix (SKILL
-step 5). A run that never trips a limit can still be scientifically wrong; this check is what catches it.
+the numbers; a suspicious sign (slow but progressing, a non-finite loss) is a notification, not a fix (the
+SKILL's judging step). A run that never trips a limit can still be scientifically wrong; this check is what catches it.
 
 ## Triage a job that did not succeed
 ```bash
@@ -66,18 +70,18 @@ sky jobs logs --controller --no-follow $JOB | tail -50
 |---|---|---|
 | `SUCCEEDED`, FINAL.json `completed` | done | finish runbook |
 | `SUCCEEDED`, FINAL.json `deadline_stopped` | the deadline | report the step reached; finish runbook |
-| `SUCCEEDED`, no FINAL.json and a journal `limit` event (budget, no_progress, attempts) | a limit in the worker | report which limit, the step reached and the spend bound (`journal-show`). To go on: the user approves a raised limit in the contract, then relaunch under the same run id (launch runbook §4); it resumes from the newest checkpoint. Otherwise the finish runbook (its path without FINAL.json) |
+| `SUCCEEDED`, no FINAL.json and a journal `limit` event (budget, no_progress, attempts) | a limit in the worker | report which limit, the step reached and the spend bound (`journal-show`). To go on: the user approves a raised limit in the contract, then relaunch under the same run id (`gpu-training-launch` → `references/runbook.md#4-submit-standard-tier-then-the-optional-guard`); it resumes from the newest checkpoint. Otherwise the finish runbook's path without FINAL.json (`gpu-training-finish` → `references/runbook.md#a-run-without-finaljson-offline-only`) |
 | `CANCELLED`, `failure_reason` names `wait_for_scheduling_timeout` | no capacity before the first start | report the wait; relaunch later, or with another approved GPU or region, only with new approval |
 | `CANCELLED`, the guard ledger's `log` has a cancel (with the guard) | guard limit | report the reason (budget during a wait, capacity wait, wedged VM); a new launch needs new approval |
 | `CANCELLED`, otherwise | a person or another tool | ask before anything else |
 | `FAILED_NO_RESOURCE`, `FAILED_PRECHECKS`, `FAILED_SETUP`, `FAILED_CONTROLLER` | infrastructure | read `failure_reason` and the controller log: capacity, quota, credentials, image pull; relaunch only within the approval |
 | `FAILED`, return code 4 (or 1 with a preflight `"ok": false` line) | preflight | image, driver or host mismatch: fix the image or the GPU choice; never relaunch as is |
 | `FAILED`, return code 3 (or 1 with a `blocked:` line) | blocked | restore identity, storage or credentials: resolve it; never start fresh |
-| `FAILED`, return code 93 | stall | the stall watchdog stopped a silent job: read the `STALL` line (the rank with the oldest tick, phase, step, gap, limit) and the stacks under it. A Python traceback just above it is a crash whose exit hung: fix that error. The stacks show where Python waits, often a step after the operation that hung (the next GPU copy or `.item()`); a collective hang: read the framework's dump (PyTorch: lifecycle `references/pytorch.md`). Show the user where the code stopped, fix it and requalify before any relaunch (launch runbook step 1: a failing qualification keeps its cluster for the fix loop). Healthy work silent past its limit: raise that phase's limit ([guard](guard.md#stall-watchdog)) |
+| `FAILED`, return code 93 | stall | the stall watchdog stopped a silent job: read the `STALL` line (the rank with the oldest tick, phase, step, gap, limit) and the stacks under it. A Python traceback just above it is a crash whose exit hung: fix that error. The stacks show where Python waits, often a step after the operation that hung (the next GPU copy or `.item()`); a collective hang: read the framework's dump (PyTorch: lifecycle `references/pytorch.md`). Show the user where the code stopped, fix it and requalify before any relaunch (`gpu-training-launch` → `references/runbook.md#1-gpu-qualification-once-per-new-stack-inside-the-approved-qualification-cap`: a failing qualification keeps its cluster for the fix loop). Healthy work silent past its limit: raise that phase's limit ([guard](guard.md#stall-watchdog)) |
 | `FAILED`, return code 124 | runtime timeout | the allocation ran for the budget's whole runway at the ceiling: the worker's limits should have stopped it first, so check that the entrypoint calls `limits` (lifecycle entrypoint contract); report the spend bound |
 | `FAILED`, other code | application | fix the code, rerun the qualification task, then relaunch within the approved fix-and-relaunch cycles |
 
 With the guard, before any relaunch the failed job's guard ledger must be done, so the next guard carries its
-spend and attempts over (launch runbook): `~/sky-venv/bin/python <skill-dir>/scripts/campaign_guard.py --close-job --workdir $W
+spend and attempts over (`gpu-training-launch` → `references/runbook.md#4-submit-standard-tier-then-the-optional-guard`): `~/sky-venv/bin/python <skill-dir>/scripts/campaign_guard.py --close-job --workdir $W
 --job-id $JOB` closes a terminal job; a job the guard cannot observe closes only with `--reason "<what you
 checked in the provider console>"`.

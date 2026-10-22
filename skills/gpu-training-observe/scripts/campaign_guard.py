@@ -2,10 +2,16 @@
 """Reference campaign guard: enforces a spend ceiling, attempts, capacity wait and an optional deadline.
 
 SkyPilot Managed Jobs will wait for spot capacity indefinitely and has no campaign budget. Since v0.10 the
-worker enforces the run's limits itself (checkpoint_marker.py limits); this guard is optional and, with
-worker_limits (set by --init-config when the contract's monitoring.guard is external), leaves the deadline and
-the attempt limits to the worker and adds what no worker can see: waiting for capacity after a preemption, the
-spend of billed waits, a timed on-demand fallback, a wedged VM and notices while no VM exists.
+worker enforces the run's limits itself (checkpoint_marker.py limits); this guard is optional and adds what no
+worker can see: waiting for capacity after a preemption, the spend of billed waits, a timed on-demand fallback,
+a wedged VM and notices while no VM exists.
+worker_limits (set to true by --init-config when the contract's monitoring.guard is external, which is how the
+guard is attached) splits the work with the worker: the guard skips its deadline_utc, max_attempts and
+max_attempts_without_progress checks (the worker enforces them at every start); it cancels at the budget only
+while the job is not RUNNING (a billed wait the worker cannot see), because the worker stops a RUNNING job
+gracefully at its budget runway and the two must not race; and --init-config sets notify_evals to false, since
+the worker sends the evaluations. The capacity wait, the fallback, the wedge check,
+the spend count and the milestone notices stay with the guard. Whichever limit comes first stops the run.
 This guard runs OUTSIDE the GPU worker (cron/systemd timer or --loop) on an always-on host,
 persists its ledger, and cancels the managed job (then notifies) when an approved limit is hit.
 It watches managed jobs only; a plain `sky launch` cluster (Minimal tier) is bounded by its own
@@ -42,6 +48,7 @@ guard.json (no secrets; unknown keys are rejected):
    "shutdown_reserve_minutes": 5, "graceful_cancel_seconds": 120,
    "state_path": "/var/lib/campaign-guard/run-7.json", "max_blind_minutes": 15,
    "notify_cmd": ["/usr/local/bin/notify-me"], "notify_milestones": true,
+   "worker_limits": true, "notify_evals": false,
    "fallback": {"approved": true, "after_capacity_wait_minutes": 10,
                 "task_yaml": "/etc/campaign-guard/training.on-demand.yaml",
                 "secrets_cmd": ["bash", "/abs/project/secrets-env.sh"]}}
