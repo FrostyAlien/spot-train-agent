@@ -96,7 +96,7 @@ copied to this machine with the provider's CLI or hooks.
 
 - **The image:** built on this machine, test `<name>:local` before the [push](#4-log-in-and-push), from a copy of
   experiment.json whose `image.digest` is its ID (`docker image inspect <name>:local --format '{{.Id}}'`) and
-  `image.reference` is `<name>`. Built on the control host or in CI: `docker pull <reference>@<digest>` (log in as in [section 4](#4-log-in-and-push) for a
+  `image.reference` is `<name>`. Built on the control host or in CI: `docker pull <reference>@<digest>` (log in as in [log in and push](#4-log-in-and-push) for a
   private registry) and keep the recorded digest.
 - **The copy of experiment.json** also has this machine's GPU count and metrics off (`monitoring.metrics_backend:
   none` and W&B `enabled: false`, or W&B `mode: offline`), so no secrets are needed. `QARGV` is the launch runbook's, with the
@@ -116,5 +116,5 @@ docker run --rm --gpus all --shm-size <size> -w /tmp --env-file task.env \
 Check: the journal-check line passes and `QUALIFY-DONE` prints, as in the launch runbook. A different GPU
 proves the code path, save and resume; ignore its memory, startup and timing figures. Fix code here and
 rerun with a new tag (the container writes the checkpoint folder as root: clean it with `sudo` if needed).
-After any fix, push the image and record its digest ([section 4](#4-log-in-and-push)) before the cloud qualification task, which
+After any fix, push the image and record its digest ([log in and push](#4-log-in-and-push)) before the cloud qualification task, which
 still runs once: only it proves the provider's GPUs, driver, bucket mount and startup time.

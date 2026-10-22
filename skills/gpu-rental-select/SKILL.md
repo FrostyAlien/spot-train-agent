@@ -23,7 +23,7 @@ Recommends the cheapest suitable completed experiment for one single-node run wi
 8. **Calibrate throughput** from matched measurements, or from the qualification task (or a separately budgeted calibration run) of the exact image/config/data ([calibration accounting](references/calculator.md#calibration-accounting)).
 9. **Rank** by cost per committed useful nonpadding token or optimizer step and by time-to-quality, not by utilization alone.
 10. **Pass the exact recovery capability gate** for the actual client/server/adapter and provider/region/GPU/purchase-mode tuple: lifecycle `references/gates.md#exact-recovery-capability-gate`.
-11. **Lock the choice.** Set `purchase_model` to the selected offer's `spot` or `on-demand`, and lock the chosen cloud and region as `provider`/`region`. Pinning `infra:` is SkyPilot's documented choice for a fixed cloud; here it keeps data and checkpoints with the compute. The choice stays fixed once the run starts (lifecycle provider lock): for a running experiment, report the authorized recovery options instead of reselecting; a provider move is a separately approved successor experiment.
+11. **Lock the choice.** Set `purchase_model` to the selected offer's `spot` or `on-demand`, and lock the chosen cloud and region as `provider`/`region`. Pinning `infra:` is SkyPilot's documented choice for a fixed cloud; here it keeps data and checkpoints with the compute. The choice stays fixed once the run starts (lifecycle provider lock): for a running experiment, report the authorized recovery options instead of reselecting.
 12. **Report,** leaving deployment approval pending; refresh quotes immediately before any authorized launch, because prices and capacity change between selection and launch.
 
 ## Outputs

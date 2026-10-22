@@ -171,7 +171,7 @@ sky down -y q-r$T
 ```
 The same two starts on a CPU VM in a region with CPU-only quota (the control host's region, for example),
 the data streamed, one process, GPU-only options dropped by the entrypoint. It proves storage and resume
-wiring only; the GPU path stays unqualified until step 1 runs. Check: `stage rehearsal-$T exit 0` and the
+wiring only; the GPU path stays unqualified until the GPU qualification runs. Check: `stage rehearsal-$T exit 0` and the
 journal-check line with `"ok": true` (no `startup_minutes`: the rehearsal runs no GPU probe).
 
 ## 3. Approval

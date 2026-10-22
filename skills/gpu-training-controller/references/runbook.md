@@ -43,9 +43,8 @@ sudo apt-get update -q && sudo apt-get install -y -q docker.io python3-venv jq
 sudo systemctl enable --now docker
 python3 -m venv ~/sky-venv && ~/sky-venv/bin/pip install -q '<skypilot or skypilot-nightly>[<cloud>]==<version chosen at the start>'
 ```
-Pin before writing any command: the client matches the server, the server image goes by digest (never `latest`), and
-schema and flags come from the chosen version's `--help`, not from the latest docs (an older stable release may
-lack their fields). Record the release (or exact nightly) and its source URLs in the version lock.
+Never pin the server image as `latest`, and take no schema or flag from the latest docs: an older stable release may
+lack their fields. Record the release (or exact nightly) and its source URLs in the version lock.
 Check: `~/sky-venv/bin/sky --version` prints the chosen version; `sudo docker info` works.
 Nothing else goes into `~/sky-venv`: data preparation and other tools get their own venv or container,
 so an install for them never changes the SkyPilot that the API server and the guard run.
@@ -89,7 +88,7 @@ With the optional guard (`monitoring.guard: external`), on the guard host:
 ~/sky-venv/bin/python <observe-skill>/scripts/campaign_guard.py --self-test
 ~/sky-venv/bin/python <observe-skill>/scripts/campaign_guard.py --check-sdk
 ```
-Check: `{"self_test": "ok"}` and `"ok": true`. Without the guard there is nothing to check here. The renderer's round trip and the dry run need the image
+Check: `{"self_test": "ok"}` and `"ok": true`. Without the guard, skip these two commands. The renderer's round trip and the dry run need the image
 digest, so they run in the launch runbook once the image is pushed. A local API server on the operator's
 machine that has been running since an earlier project is restarted once at the start (`sky api stop; sky
 api start`): a long-lived one can fail every request while `sky api info` still says healthy. Whenever a
