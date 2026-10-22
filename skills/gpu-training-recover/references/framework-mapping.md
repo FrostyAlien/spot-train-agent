@@ -40,7 +40,7 @@ files = list every path under payload/ after one real save (all ranks done, all 
 for each file: roles = what the file actually contains (inspect keys once, record them); rank if per-rank
 derived_roles = {role: {from: [...], semantics: "..."}} for each state the framework rebuilds
 commit(step_dir, fields(identity, step, world_size, derived_roles, ...), files)
-test once per stack: interrupted-versus-uninterrupted continuation (recover contract, offline tests)
+test once per stack: interrupted-versus-uninterrupted continuation (contract.md#8-offline-test-plan-and-acceptance-criteria)
 ```
 
 Hooks under multi-process launchers that rebuild the training object in each child:

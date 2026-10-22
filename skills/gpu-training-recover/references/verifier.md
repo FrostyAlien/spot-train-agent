@@ -28,7 +28,7 @@ Exit 0 means local declared inventory/integrity verified. Exit 1 returns JSON er
 
 `verify(..., pending_commit=record)` checks a directory before its marker exists, as if `record` were its COMMITTED.json; `checkpoint_marker.py commit` uses it so a marker is only ever written for a checkpoint that already passes. `checkpoint_marker.py select` runs the verifier on mounted candidates newest first.
 
-See contract.md for adapter responsibilities and dated primary references. This file specifies an original local format, not a format any framework emits natively; an integration must inventory the framework's complete native checkpoint into it without discarding required files.
+Adapter responsibilities and dated primary references: [contract](contract.md#2-training-checkpoint-content-and-boundaries). This file specifies an original local format, not a format any framework emits natively; an integration must inventory the framework's complete native checkpoint into it without discarding required files.
 
 ## Optional coordinator acceptance record (multi-writer setups only)
 Single-node managed jobs have one writer and do not need this record. Use `--accepted-record /absolute/path/to/controller-record.json` when independently obtained from the protected controller journal. The record must be outside the downloaded checkpoint directory and contain schema_version=1, run_id, exact integer global_step, attempt_id, exact nonnegative integer fencing_generation, manifest_sha256 and commit_sha256 (SHA-256 of exact COMMITTED.json bytes). Both manifest and COMMITTED metadata must carry matching attempt_id and fencing_generation. Historical accepted generations may be valid; pass the record for this exact candidate, not merely the current attempt’s generation.
