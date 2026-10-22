@@ -33,12 +33,11 @@ Checked 2026-10-08 (Nebius docs and tutorials); used live 2026-10-21 (login, `sk
 | Known issues | #10965 "No project found for region eu-west1" on 0.14.0; #10387 above | 2026-10-08 |
 
 Hooks for these operations: [nebius-hooks.sh](../../assets/providers/nebius-hooks.sh), checked with Nebius CLI
-0.12.283; re-test each read-only one in the start checks (lifecycle `references/provider-hooks.md`).
+0.12.283; re-test each read-only one in the start checks ([provider hooks](../provider-hooks.md)).
 
 ## Optional spot price cap *(offline only)*
 A pricing policy holds a maximum spot price per GPU-hour for one GPU platform in one project; above it Nebius stops
-the VM. Its price can change only while no running VM uses it; a cap below the current price blocks starts until the
-price drops. Only some platforms take a policy, and the set depends on the region (live 2026-10-21, eu-north1: only
+the VM. Its price can change only while no running VM uses it. Only some platforms take a policy, and the set depends on the region (live 2026-10-21, eu-north1: only
 `gpu-h100-sxm` and `gpu-h200-sxm`; `gpu-l40s-a` was refused with `PlatformNotAvailable`). When the GPU is
 chosen, check Nebius's pricing-policy docs for the chosen platform and region before the cap goes into the plan.
 The `create` below is the final check: a `PlatformNotAvailable` refusal means no cap on this platform; tell the
@@ -47,13 +46,12 @@ user. With the user's approval, before the run:
 nebius billing pricing-policy create --parent-id <project id> --name <run id>-cap \
   --compute-instance-spec-v1-platform <gpu platform> --pricing-max-price-v1-max-price <price per GPU-hour>
 ```
-Record the returned ID as `budget.spot_price_cap.cap_id` (and the price as `per_gpu_hour`). The worker then caps its
-own VM through `hook_price_cap` (provider hooks: optional spot price cap). Prove it once with a small GPU spot VM for
-a few minutes before relying on it: the hook's update (`compute instance update --patch --spot-pricing-policy-id
-<id> --stopped` in nebius-hooks.sh), the VM's own credentials, SkyPilot's restart of the stopped VM
-and the cap on the restarted VM.
+Record the returned ID as `budget.spot_price_cap.cap_id` (and the price as `per_gpu_hour`); the worker then caps its
+own VM ([how, and the one-time proof](../provider-hooks.md#optional-spot-price-cap)). On Nebius that proof covers the
+hook's update (`compute instance update --patch --spot-pricing-policy-id <id> --stopped` in nebius-hooks.sh), the
+VM's own credentials, SkyPilot's restart of the stopped VM and the cap on the restarted VM.
 
 ## Nebius's own agent skills
 `nebius/skills` (public since 2026-10-02) has billing, capacity-quotas, compute-inventory and public-docs skills,
 useful for the research rows above; load them selectively. Never its compute-provision or serverless-jobs skills
-while this suite drives a run (provider-research: optional official provider skills).
+while this suite drives a run ([optional official provider skills](../provider-research.md#optional-official-provider-skills)).

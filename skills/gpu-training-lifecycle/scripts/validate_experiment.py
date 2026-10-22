@@ -10,7 +10,8 @@ from pathlib import Path
 STATES = {'planning','ready','running','recovering','paused','completed','cancelled','failed'}
 HF_DATASET = re.compile(r'hf://datasets/[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9._-]+(/[^?#]*)?')
 SHUTDOWN_RESERVE_HOURS = (60 + 5 * 60) / 3600     # the guard's default poll plus shutdown reserve
-# Where the SkyPilot API server runs. The first three are the older names, still accepted.
+# Where the SkyPilot API server runs (experiment contract: controller.mode). Older names, still accepted:
+# existing-host (= self-hosted), remote-api-server and standalone-managed.
 SELF_HOSTED = {'self-hosted', 'existing-host'}
 CONTROLLER_MODES = SELF_HOSTED | {'existing', 'provider-managed', 'local', 'remote-api-server', 'standalone-managed'}
 NOTIFY_FORMATS = ('text', 'slack', 'discord', 'json')    # observe skill: notify.py

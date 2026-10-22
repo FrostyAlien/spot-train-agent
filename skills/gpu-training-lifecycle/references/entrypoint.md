@@ -7,6 +7,9 @@ parsed by the framework's own parser, the imports, pure functions. Fresh start, 
 are proven on the GPUs by the qualification task (or the optional CPU rehearsal) against the real bucket
 before the main run; a CPU pass never qualifies a multi-process or GPU fix.
 
+Contents: [inputs](#inputs) (with the collective timeout, progress ticks and argv); [behaviour by RUN_MODE](#behaviour-by-run_mode);
+[exit codes](#exit-codes-what-triage-reads); [pseudo-code](#pseudo-code) and its notes.
+
 ## Inputs
 The rendered task (`gpu-training-launch` → `scripts/render_job.py`) sets:
 
@@ -19,7 +22,7 @@ The rendered task (`gpu-training-launch` → `scripts/render_job.py`) sets:
 | `IMAGE_DIGEST`, `GPU_COUNT` | the image digest and the GPU count from the contract (an image cannot know its own digest): identity fields of every manifest and the preflight journal |
 | `CAMPAIGN_DEADLINE_UTC` | optional absolute deadline (train only; absent by default: the budget is the hard stop) |
 | `CAMPAIGN_SUBMITTED_AT` (the run's first submission), `BUDGET_LIMIT_USD`, `BUDGET_RESERVED_USD`, `CEILING_HOURLY_USD`, `FREE_WITHOUT_VM`, `STARTUP_ALLOWANCE_MINUTES`, `MAX_ATTEMPTS_WITHOUT_PROGRESS`, `MAX_ATTEMPTS` | the run's limits (train only), read by `checkpoint_marker.py limits --from-env` at every start (below); no secrets |
-| `PRICE_CAP_ID` | optional (`budget.spot_price_cap.cap_id`): the provider's spot price cap for `hook_price_cap` (provider hooks: optional spot price cap) |
+| `PRICE_CAP_ID` | optional (`budget.spot_price_cap.cap_id`): the provider's spot price cap for `hook_price_cap` ([spot price cap](provider-hooks.md#optional-spot-price-cap)) |
 | `NOTIFY_URL`, `NOTIFY_FORMAT` | the notification channel: `NOTIFY_URL` is a required secret (in `SECRET_NAMES`) whenever the contract names a channel, so the wrapper blocks when it is missing; `notify.py` reads both |
 | `SECRET_NAMES` | secrets the launch supplies as environment variables (the `SKYPILOT_DOCKER_*` ones are consumed by SkyPilot for the image pull) |
 | `WANDB_*` or `METRICS_BACKEND` | the researcher's metrics choice; qualification runs get their own metrics run id |
@@ -229,6 +232,6 @@ Notes:
 - Metrics: rank 0 only, the stable run id from the environment; never decide resume from metrics history.
   A project without an evaluation still prints the `EVAL step=<n> {...}` line at the planned points, with its
   training metrics (loss, learning rate, throughput): the guard forwards it and the observe waits read it.
-- The stdlib helpers (the list: `gpu-training-image` SKILL.md step 6) are vendored into the image at
+- The stdlib helpers (the list: the `gpu-training-image` SKILL's entrypoint-and-helpers step) are vendored into the image at
   `/opt/gpu-skills/` (the rendered `run:` starts `/opt/gpu-skills/progress_watch.py`). The qualification runs those
   copies, so it proves what the main run will use.
