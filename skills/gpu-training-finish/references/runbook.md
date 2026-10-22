@@ -1,9 +1,9 @@
 # Finish runbook
 
-On the control host (or, without one, the operator's machine) in bash after the run's last job ended, with the pinned client's `sky` (launch runbook),
+On the control host (or, without one, the operator's machine) in bash after the run's last job ended, with the pinned client's `sky` (launch `references/runbook.md`),
 `R=<launch-skill>/scripts/render_job.py`, `G=<observe-skill>/scripts/campaign_guard.py`, `P=~/sky-venv/bin/python`
 (the guard imports SkyPilot), `ST=<controller-skill>/scripts/stage.sh`, `W=~/campaign/<run_id>`
-(the run's campaign directory, launch runbook). Nothing here deletes
+(the run's campaign directory, launch `references/runbook.md`). Nothing here deletes
 anything; retention is the user's decision. Steps marked *(offline only)* have not run in a live test yet; the rest ran live (`VALIDATION.md`).
 
 ## 1. Every job is terminal and its guard is closed
@@ -28,18 +28,20 @@ A nonzero exit prints the reason (no FINAL.json, a newer verified commit, a chan
 is unproven; report it, never paper over it. `FINISH-JOURNAL` lines are the lineage of every attempt; its
 `lineage_warnings` (a fresh start after an earlier attempt had committed: that progress was lost) go into
 the report. `FINISH-PARTIAL <dir>` lines are checkpoint directories without a marker (saves cut off by a
-preemption): list them, with the checkpoints older than the final one, in the inventory below.
+preemption): list them, with the checkpoints older than the final one, in the [inventory](#4-what-still-bills).
 
-**A run without FINAL.json** *(offline only)* (stalled with exit 93, cancelled, crashed, or stopped by a budget or attempt limit and not continued): the verify task still
+### A run without FINAL.json *(offline only)*
+For a run that stalled (exit 93), was cancelled, crashed, or was stopped by a budget or attempt limit and not continued, the verify task still
 prints the `FINISH-PRUNE`, `FINISH-JOURNAL` (the lineage) and `FINISH-PARTIAL` lines, then `FINISH no readable
-FINAL.json` and exit 3. Take the outcome from the observe runbook's triage (status, exit code, the `STALL` line).
+FINAL.json` and exit 3. Take the outcome from the observe triage (status, exit code, the `STALL` line: observe `references/runbook.md#triage-a-job-that-did-not-succeed`).
 The run's last durable state is the newest directory in `FINISH-PRUNE`'s `keep` list: complete by presence (its
 marker and every manifest file at its manifest size), not hash-verified; a resume's `select` verifies it. An empty
 `keep` list with no commit in `FINISH-JOURNAL` means nothing durable; otherwise check the bucket (a directory the
 prune list cannot read is skipped). Report both.
 
-**A run the user stops early** *(offline only)*: cancel its job by id, gracefully (``observe `references/commands.md` ``),
-and wait until it is terminal. When the user wants the newest committed checkpoint as the result, run step 2 and
+### A run the user stops early *(offline only)*
+Cancel its job by id, gracefully (observe `references/commands.md#cancel-within-explicit-operation-scope`),
+and wait until it is terminal. When the user wants the newest committed checkpoint as the result, run [the verify task](#2-verify-finaljson-against-the-bucket-cpu-cents) and
 skip its `sky down`: its exit 3 with `FINISH no readable FINAL.json` is expected here, and its cluster stays up
 with the helpers and the bucket mounted until its 10-minute idle autodown. Right after that, write FINAL.json there (`finalize` always names the newest committed
 checkpoint that verifies, with the identity of its manifest):

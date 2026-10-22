@@ -1,6 +1,11 @@
 # Exact-ID provider lifecycle reference
 
-No per-provider commands are kept here. For the chosen provider, record in the project's provider record the read-state, stop and delete commands for every resource type the run created (VMs, disks/volumes, IPs, buckets, registries), with the CLI version and date; the provider hooks hold the VM find/stop and the inventory used by the runbooks. These are command syntax, not authority. Run only with an already authorized CLI/profile, the exact verified resource ID, the applicable action permission and the artifact/data-loss checks from SKILL.md. Inspect the installed version's help first; never transform inventory output into bulk delete pipelines, suppress confirmation prompts without authority, or treat a failed read as successful deletion.
+No per-provider commands are kept here. For the chosen provider, record in the project's provider record the read-state, stop and delete commands for every resource type the run created (VMs, disks/volumes, IPs, buckets, registries), with the CLI version and date; the provider hooks hold the VM find/stop and the inventory used by the runbooks.
+
+These are command syntax, not authority:
+- Run them only with an already authorized CLI/profile, the exact verified resource ID, the applicable action permission and the artifact/data-loss checks from the SKILL's gates.
+- Inspect the installed version's help first.
+- Never transform inventory output into bulk delete pipelines, suppress confirmation prompts without authority, or treat a failed read as successful deletion.
 
 Semantics to establish per provider before acting (stop is not delete):
 - Stop through the provider's API or CLI: a guest `shutdown`/`halt` can reboot the VM or keep it billing on some providers.
