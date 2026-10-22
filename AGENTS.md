@@ -42,13 +42,29 @@ These come from the maintainer's decisions during live tests; follow them unless
 - **Helpers copied into the training image** (`checkpoint_marker.py`, `verify_checkpoint.py`, `gpu_preflight.py`, `progress_watch.py`, `notify.py`, `torch_rank.py`; image skill step 6) run inside users' containers at `/opt/gpu-skills/`. Keep them self-contained single files.
 - **Do not claim what did not run.** A runbook step that has not run live keeps its *(offline only)* marker; VALIDATION.md records only checks that were performed.
 
+## Progressive disclosure
+
+The core rule for skill text. The agent loads each level only when it needs it, so every detail sits at the level where it is needed:
+
+| Level | Holds | Size |
+|---|---|---|
+| `description` | what the skill does, then "Use when ..."; third person, specific, no negations | <= 60 words |
+| `SKILL.md` body | the decisions: each step's action and the rule that governs it, the gates (money, deletion, secrets) in bold with a one-clause why, costly gotchas | ~500-800 words; never over 500 lines |
+| `references/` | the how: commands, checks, contracts, examples; one file per situation (a stage, a variant, a rare case), split by when it is read, not by length | table of contents when over 100 lines |
+| `scripts/` | the mechanism; text gives the command and its check, never the internals | `--help` |
+
+- **Placement:** a detail goes at the highest level where leaving it out would cause a wrong action before the agent reaches the level below.
+- **Pointers name their trigger,** at the step where it happens: "Read `references/x.md` before <action>: it holds <contents>." Every file in `references/` is listed in its skill's `SKILL.md` this way (`tests/test_links.py` enforces the listing).
+- **One level deep:** `SKILL.md` links every file a task needs. A reference points elsewhere only to where a shared fact lives, by anchor.
+- **When moving a section down,** keep its one governing sentence in `SKILL.md` with the pointer.
+- **Each fact lives once;** elsewhere, point to it. The one exception: a gate may be restated in one line at the command it guards.
+
 ## Writing skill text
 
-- `SKILL.md` frontmatter has `name` (the directory name) and `description` (what it does, then "Use when ..."). The description drives routing; keep it specific and avoid negations.
-- `SKILL.md` stays short: Inputs, Steps, Outputs, Gates, References. Detail goes in `references/`.
-- Every file in `references/` is listed in its skill's `SKILL.md` with a line that says when to read it (`tests/test_links.py` enforces this).
+- `SKILL.md` frontmatter has `name` (the directory name) and `description`. Sections: Inputs, Steps, Outputs, Gates, References.
 - Cross-skill pointers use `` `gpu-xxx` → `references/name.md#anchor` `` or the short form ``lifecycle `references/name.md` ``; links and anchors must resolve (also checked by `tests/test_links.py`). Pointers by step number ("§4") are not checked, so prefer anchors.
-- One fact lives in one place; elsewhere, point to it. When moving text, check nothing was lost.
+- When moving text, check nothing was lost.
+- Follow the `skill-creator` guide and Anthropic's example skills: explain why instead of stacking MUSTs; no stacked conditions or over-specification.
 - Plain, short sentences. Say what to do, then the condition. Commands appear exactly as they run.
 
 ## Commits and releases
