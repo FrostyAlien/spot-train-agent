@@ -54,7 +54,8 @@ The core rule for skill text. The agent loads each level only when it needs it, 
 | `scripts/` | the mechanism; text gives the command and its check, never the internals | `--help` |
 
 - **Placement:** a detail goes at the highest level where leaving it out would cause a wrong action before the agent reaches the level below.
-- **Pointers name their trigger,** at the step where it happens: "Read `references/x.md` before <action>: it holds <contents>." Every file in `references/` is listed in its skill's `SKILL.md` this way (`tests/test_links.py` enforces the listing).
+- **Steps start with a verb** after their bold label; a step is an action, not a list of nouns.
+- **Pointers name their trigger,** at the step where it happens: "Read `references/x.md` before <action>: it holds <contents>." A step's pointer reaches every section that governs its choice, by anchor. Every file in `references/` is listed in its skill's `SKILL.md` this way (`tests/test_links.py` enforces the listing). References name a SKILL step by its label ("the SKILL's approval step"), never by number.
 - **One level deep:** `SKILL.md` links every file a task needs. A reference points elsewhere only to where a shared fact lives, by anchor.
 - **When moving a section down,** keep its one governing sentence in `SKILL.md` with the pointer.
 - **Each fact lives once;** elsewhere, point to it. The one exception: a gate may be restated in one line at the command it guards.

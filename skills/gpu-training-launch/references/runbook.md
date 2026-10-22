@@ -13,6 +13,8 @@ JSON array, e.g. `ARGV='["python","-m","project.train","--batch","32"]'`; every 
 `RUN` is the contract's `run_id`; `W=~/campaign/$RUN` is the run's campaign directory (rendered tasks,
 secrets file, qualification logs, guard ledgers, evidence). Steps marked *(offline only)* have not run in a live test yet; the rest ran live (`VALIDATION.md`).
 
+Contents: [0. Secrets file and start checks](#0-secrets-file-before-each-launch-never-in-chat-yaml-or-arguments); [1. GPU qualification](#1-gpu-qualification-once-per-new-stack-inside-the-approved-qualification-cap); [2. CPU rehearsal](#2-cpu-rehearsal-fallback-only-when-gpu-time-is-unaffordable-cents-offline-only); [3. Approval](#3-approval); [4. Submit, then the optional guard](#4-submit-standard-tier-then-the-optional-guard); [Minimal tier](#minimal-tier-offline-only).
+
 ## 0. Secrets file (before each launch; never in chat, YAML or arguments)
 The project owns a small script that prints `NAME=value` lines from files and the provider CLI, e.g.:
 ```bash
@@ -187,7 +189,7 @@ control host) to `budget.controller_allowance` and note it in `qualification.jso
 --notify-cmd '<json argv>' --dry-run`: it prints the guard's `runway_hours`, attempt limits, `deadline_utc` and
 carried-over spend and attempts.
 Every spend figure here and in later reports is an upper bound at the on-demand price; the real spot cost
-comes from the provider's bill. Approval at the interaction level: SKILL step 8. The guard's notify command
+comes from the provider's bill. Approval at the interaction level: the SKILL's approval step. The guard's notify command
 receives one JSON message on stdin; it reads the URL from the secrets script (the secrets file is deleted after the
 launch), so the URL never sits in its argv or the guard's files (for example
 `["bash","-c","curl -sS -d @- \"$(bash /abs/secrets-env.sh | sed -n s/^NOTIFY_URL=//p)\""]`).
@@ -211,10 +213,9 @@ echo "job $JOB"; rm $W/secrets.env
 Check: one integer (job ids only grow, so the newest job named `$RUN` is this one). If the launch failed
 or timed out without an id, do not resubmit: look for the job first (`sky jobs queue -o json`, name `$RUN`,
 recent `submitted_at`). Every job of the run renders with the same `$W/campaign-start`, so the worker's spend bound
-covers earlier jobs and the gaps between them (with `budget.free_without_vm`, the run's alive files count every
-allocation instead). Spend outside the run (qualification, data, control host, earlier run revisions) is counted once,
-in `budget.controller_allowance`. Without `budget.free_without_vm` the time between jobs counts too (a relaunch a day
-later starts with a day spent): relaunch soon, or raise the budget with approval. The worker now enforces the run's limits and notifies; continue with the observe runbook. The rest of this section is only
+covers earlier jobs and, without `budget.free_without_vm`, the time between them: relaunch soon, or raise the budget
+with approval. Spend outside the run (qualification, data, control host, earlier run revisions) is counted once, in
+`budget.controller_allowance`. The worker now enforces the run's limits and notifies; continue with the observe runbook. The rest of this section is only
 for the optional guard (`monitoring.guard: external`); before the submission above, its dry run must then say ok:
 ```bash
 $P $G --init-config --contract /abs/experiment.json --job-id 0 --workdir $W --notify-cmd '<json argv>' --dry-run | grep -q '"runway_hours"' || { echo "guard config refused: fix it before submitting"; exit 1; }
