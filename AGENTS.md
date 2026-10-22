@@ -83,6 +83,6 @@ The core rule for skill text. The agent loads each level only when it needs it, 
   git archive --format=zip --prefix=spot-trainer/ -o spot-trainer-vX.Y.Z.zip vX.Y.Z
   ```
 
-- Build each release on its own branch, `release/vX.Y.Z`, in a separate worktree (the shared checkout stays on `main`). Merge it into `main` through a pull request only after the tests, the review and the live test pass (a merge commit, no squash); tag on `main`. Live-test fixes land on the release branch first.
+- Build each release on its own branch, named with the conventional prefix of its main change and its topic (`feat/`, `fix/` or `docs/`, for example `docs/skill-text-consistency`), in a separate worktree (the shared checkout stays on `main`). Merge it into `main` through a pull request only after the tests, the review and the live test pass (a merge commit, no squash); tag on `main`. Live-test fixes land on that branch first.
 - Each release's scope goes in the release notes on the tag (the GitHub release text), written for users: what changed and why, without links to private records.
 - Research notes, reviews, benchmarks and live-test logs stay out of this repository. The maintainer keeps them in the gitignored `dev/` folder; never force-add it, and never run `git clean -x` or `-X`, which deletes it.
