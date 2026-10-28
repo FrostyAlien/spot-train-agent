@@ -6,11 +6,13 @@ The [runbook](runbook.md) has the commands that ran live. Checked 2026-10-01 aga
 sky api info
 sky jobs queue --help
 sky jobs queue
+sky jobs queue -a
 sky status -u
 sky api status REQUEST_ID
 sky jobs logs JOB_ID --no-follow
 sky jobs logs --controller JOB_ID --no-follow
 sky cost-report
+sky cost-report -a
 ```
 Use recorded exact request/job IDs in place of placeholders. Queue/request/cluster state are different layers: correlate them with provider instance IDs. Cost report is estimated. A provider inventory query is needed to confirm paid resources actually disappeared. Omit refresh flags unless approved: `sky jobs queue -r` and `sky jobs logs -r` may restart a stopped remote controller.
 

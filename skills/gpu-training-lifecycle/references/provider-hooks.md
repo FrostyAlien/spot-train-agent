@@ -18,19 +18,22 @@ commands, never secret values (read them from the provider CLI's own login or fi
 | `hook_price_cap` *(optional, offline only)* | the provider's price-cap object (for example a pricing-policy ID) | `capped` when this VM already runs under the cap; `switched` after it put this VM under the cap and asked the provider to stop it (so SkyPilot restarts the same VM, now capped) | the entrypoint's wrapper at each start ([spot price cap](#optional-spot-price-cap)) |
 
 ## Optional spot price cap
-Some providers let a spot VM carry a maximum price (above it the provider stops the VM instead of billing more),
-but SkyPilot creates spot VMs without one and restarts a stopped VM without changing its pricing. Where the provider
-allows changing a stopped VM's pricing, and SkyPilot's FAILOVER recovery restarts the stopped VM after a stop, each
-new VM can cap itself: before any training the wrapper calls `hook_price_cap <cap id>` *inside the worker*, so the
-hook and its provider CLI or API call are in the image, and the VM's credentials (SkyPilot copies the cloud's
-credentials to its VMs by default) must allow updating that VM. Contract: `budget.spot_price_cap`
-(`per_gpu_hour`, `cap_id`), created by the user or with their approval before the run. `switched` costs one restart
-per new VM and no progress (nothing trained yet); those starts never count as allocations without progress. A cap
-below the current price keeps the VM from starting until the price drops: a capacity wait. The spend bound keeps the
-on-demand ceiling. Only the recovery strategy FAILOVER restarts the same VM; any other strategy replaces it (the cap
-would never hold and every start would cap and stop again), so the validator and the renderer accept the cap only with
-FAILOVER: one region, and no ordered on-demand fallback. On a non-spot VM the hook prints `capped` and does nothing. Prove it once on the provider (a small GPU spot
-VM, a few minutes) before relying on it.
+Some providers let a spot VM carry a maximum price: above it the provider stops the VM instead of billing more.
+SkyPilot creates spot VMs without one and restarts a stopped VM without changing its pricing, so each new VM caps
+itself where the provider allows changing a stopped VM's pricing:
+- **Contract:** `budget.spot_price_cap` (`per_gpu_hour`, `cap_id`), created by the user or with their approval before
+  the run.
+- **Where it runs:** before any training the entrypoint's wrapper calls `hook_price_cap <cap id>` *inside the worker*
+  ([pseudo-code](entrypoint.md#pseudo-code)). So the hook and its provider CLI or API call are in the image, and the
+  VM's credentials (SkyPilot copies the cloud's credentials to its VMs by default) must allow updating that VM.
+- **Cost:** `switched` costs one restart per new VM and no progress (nothing trained yet); those starts never count
+  as allocations without progress. A cap below the current price keeps the VM from starting until the price drops:
+  a capacity wait. The spend bound keeps the on-demand ceiling.
+- **FAILOVER only:** only that recovery strategy restarts the same stopped VM; any other replaces it, so the cap would
+  never hold and every start would cap and stop again. The validator and the renderer therefore accept the cap only
+  with FAILOVER: one region, and no ordered on-demand fallback.
+- **On-demand:** on a non-spot VM the hook prints `capped` and does nothing.
+- **Prove it once** on the provider (a small GPU spot VM, a few minutes) before relying on it.
 
 Rules: each function is idempotent and quiet on success, writes errors to stderr and exits nonzero on
 failure; it must not print secrets except `hook_registry_password`, whose output the scripts pipe straight

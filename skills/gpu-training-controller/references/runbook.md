@@ -5,14 +5,20 @@ version chosen at the start: confirm them with that version's `--help`, and take
 official `skypilot` skill. The host needs the user's approval (size, region, disk, monthly cost) and
 access set up by the user; never ask for secret values in chat. Steps marked *(offline only)* have not run in a live test yet; the rest ran live (`VALIDATION.md`).
 
+Contents: [0 which server](#0-which-server) · [1 operator network](#1-operator-network-laptop) ·
+[2 create the host](#2-create-the-host) · [3 client and Docker](#3-install-the-pinned-client-and-docker-on-the-host) ·
+[4 cloud access](#4-skypilots-cloud-access) · [5 API server](#5-api-server-consolidated-managed-jobs-control) ·
+[6 start checks](#6-start-checks-once-per-chosen-skypilot-version) · [7 hand-off](#7-hand-off) ·
+[existing, provider-managed or local server](#an-existing-provider-managed-or-local-server) · [status](#status-any-time)
+
 ## 0. Which server
-From intake item 15, recorded as `controller.mode` in the contract:
-- **`self-hosted`**: a control host the user runs (steps 1-7 below; step 8 of the SKILL only for a long-lived one).
+From the intake's SkyPilot API server answer, recorded as `controller.mode` in the contract:
+- **`self-hosted`**: a control host the user runs (from [operator network](#1-operator-network-laptop) to [hand-off](#7-hand-off) below; the SKILL's state-and-restore step only for a long-lived one).
 - **`existing`** (a server someone else runs, such as a team's) or **`provider-managed`** (a cloud provider's hosted
   server): no control host; connect to it ([existing server](#an-existing-provider-managed-or-local-server)).
 - **`local`**: the API server on the operator's machine (`sky api start`), for development and small runs. Managed
-  jobs then run their controller on a cloud VM SkyPilot creates (deployment and state: consolidated or separate);
-  budget it. Recovery does not depend on the laptop staying awake.
+  jobs then run their controller on a cloud VM SkyPilot creates
+  ([consolidated or separate](deployment-state.md#consolidated-or-separate-jobs-controller)); budget it. Recovery does not depend on the laptop staying awake.
 Without a control host the runbooks run on the operator's machine as the SkyPilot client, long builds and data
 copies run on a short-lived CPU VM through the same SkyPilot (image runbook; data skill: staging), and the run's
 limits run in the worker (no guard needed).
@@ -37,6 +43,8 @@ sudo apt-get update -q && sudo apt-get install -y -q docker.io python3-venv jq
 sudo systemctl enable --now docker
 python3 -m venv ~/sky-venv && ~/sky-venv/bin/pip install -q '<skypilot or skypilot-nightly>[<cloud>]==<version chosen at the start>'
 ```
+Never pin the server image as `latest`, and take no schema or flag from the latest docs: an older stable release may
+lack their fields. Record the release (or exact nightly) and its source URLs in the version lock.
 Check: `~/sky-venv/bin/sky --version` prints the chosen version; `sudo docker info` works.
 Nothing else goes into `~/sky-venv`: data preparation and other tools get their own venv or container,
 so an install for them never changes the SkyPilot that the API server and the guard run.
@@ -75,11 +83,12 @@ sudo docker exec skypilot-api ls <project dir>/experiment.json <skills dir>/gpu-
 Check: both paths listed.
 
 ## 6. Start checks (once per chosen SkyPilot version)
+With the optional guard (`monitoring.guard: external`), on the guard host:
 ```bash
 ~/sky-venv/bin/python <observe-skill>/scripts/campaign_guard.py --self-test
 ~/sky-venv/bin/python <observe-skill>/scripts/campaign_guard.py --check-sdk
 ```
-Check: `{"self_test": "ok"}` and `"ok": true`. The renderer's round trip and the dry run need the image
+Check: `{"self_test": "ok"}` and `"ok": true`. Without the guard, skip these two commands. The renderer's round trip and the dry run need the image
 digest, so they run in the launch runbook once the image is pushed. A local API server on the operator's
 machine that has been running since an earlier project is restarted once at the start (`sky api stop; sky
 api start`): a long-lived one can fail every request while `sky api info` still says healthy. Whenever a
@@ -95,7 +104,7 @@ so an SSH drop never kills it.
 
 ## An existing, provider-managed or local server
 *(offline only for an existing or local server; a provider-managed one ran live)*
-Instead of steps 2-5. The client must match the server's version (SkyPilot supports only adjacent client and server
+Instead of creating and setting up a host (host, client, credentials, API server). The client must match the server's version (SkyPilot supports only adjacent client and server
 versions; a server the user does not run picks its own version):
 ```bash
 python3 -m venv ~/sky-venv && ~/sky-venv/bin/pip install -q '<skypilot or skypilot-nightly>[<cloud>]==<the server version>'
@@ -119,7 +128,7 @@ reruns the start checks before a relaunch (requalify only if the release notes t
   you may use and how cost is attributed; never change the server's cloud configuration. A stop by hand uses the
   provider hooks, which need your own provider CLI login on the operator's machine.
 - **Shared with other people:** managed jobs of everyone run on the server (or its controller); check its headroom
-  (commands reference: shared or small control host) and its uptime policy. Job lists and logs are visible to other
+  ([shared or small control host](commands.md#shared-or-small-control-host)) and its uptime policy. Job lists and logs are visible to other
   users: no secrets in logs or job names. Use only your own jobs and clusters: take the job id `sky jobs launch`
   prints, and cancel by id only, never `-a` or `-u` with `sky jobs cancel` or `sky down`.
 - **Server down or restarted by its owner:** the job's VMs keep billing; the worker's limits still stop the run.
@@ -128,9 +137,9 @@ reruns the start checks before a relaunch (requalify only if the release notes t
   saves them before that.
 - **`hf://` mounts** of a private or gated dataset need the HF token on the server's host, which you cannot reach:
   the data loader reads `HF_TOKEN` from the launch's secrets instead (data skill: staging).
-- **The optional guard** (`monitoring.guard: external`) runs on a machine that stays awake and online for the
-  campaign, else a small CPU VM, with a login that may cancel your job in the same workspace.
-- Step 8 (backup and restore) does not apply to a server the user does not run.
+- **The optional guard** (`monitoring.guard: external`) runs where observe `references/guard.md#campaign-guard` says,
+  with a login that may cancel your job in the same workspace.
+- The SKILL's state-and-restore step (backup and restore) does not apply to a server the user does not run.
 
 ## Status, any time
 ```bash
@@ -139,4 +148,4 @@ systemctl list-units --type=service 'campaign-guard-*'; df -h /
 ```
 Between runs, stop (not delete) the host when no job or guard is active; deleting it needs the user's
 approval and loses the API server state (a long-lived or shared control plane: inventory and backup first,
-SKILL step 8).
+the SKILL's state-and-restore step).

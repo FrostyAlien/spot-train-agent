@@ -3,9 +3,13 @@
 Read when the project trains with PyTorch or a framework built on it. The entrypoint contract
 ([entrypoint.md](entrypoint.md)) is framework-neutral. This file adds what only PyTorch has.
 
+Contents: [collective timeout](#collective-timeout); [scripts without hooks: rank mode](#scripts-without-hooks-rank-mode-offline-only);
+[ticks](#ticks); [diagnosis on a hang](#diagnosis-on-a-hang); [checkpoints and restore](#checkpoints-and-restore)
+([loader state on resume](#loader-state-on-resume)).
+
 ## Collective timeout
 Plain PyTorch sets it with `torch.distributed.init_process_group(timeout=...)`. A framework built on PyTorch has
-its own setting for the same value; find it in its docs. Values: [entrypoint.md](entrypoint.md).
+its own setting for the same value; find it in its docs. Values: [entrypoint.md](entrypoint.md#inputs).
 
 ## Scripts without hooks: rank mode *(offline only)*
 A PyTorch script with its own loop and no callbacks gets its `train` ticks (E1) from rank mode. The script is not
@@ -27,10 +31,10 @@ accelerate launch --multi_gpu --num_processes N /opt/gpu-skills/torch_rank.py --
 
 ## Ticks
 Pass a step counter the framework keeps as a Python int (a trainer's global step, a batch index), never a CUDA
-tensor (rules: [entrypoint.md](entrypoint.md)).
+tensor (rules: [entrypoint.md](entrypoint.md#inputs)).
 
 ## Diagnosis on a hang
-- `PYTHONFAULTHANDLER=1` ([entrypoint.md](entrypoint.md)) prints the Python stack of a rank that an NCCL abort
+- `PYTHONFAULTHANDLER=1` ([entrypoint.md](entrypoint.md#inputs)) prints the Python stack of a rank that an NCCL abort
   kills after a collective timeout.
 - PyTorch's flight recorder (on by default) keeps a ring buffer of the last collectives per rank. It dumps on a
   collective timeout and when asked. The rendered task points its dumps at `$CHECKPOINT_DIR/debug/<start>/fr-<rank>`
@@ -97,6 +101,6 @@ Sources: [torchrun](https://docs.pytorch.org/docs/2.14/elastic/run.html),
 [Accelerate CLI](https://huggingface.co/docs/accelerate/package_reference/cli).
 
 ### Loader state on resume
-One data-position owner (data skill, contract §3). Replay-and-skip: a Trainer's ordinary `ignore_data_skip=False`. Stateful cursor with a custom Trainer integration: `ignore_data_skip=True` may be needed to prevent double advancement, but the flag alone is not a correct stateful integration; custom Accelerate is often clearer when stateful streaming matters.
+One data-position owner (`gpu-training-data` → `references/contract.md#3-exactly-one-owner-of-data-advancement`). Replay-and-skip: a Trainer's ordinary `ignore_data_skip=False`. Stateful cursor with a custom Trainer integration: `ignore_data_skip=True` may be needed to prevent double advancement, but the flag alone is not a correct stateful integration; custom Accelerate is often clearer when stateful streaming matters.
 - **TorchData:** `StatefulDataLoader` exposes state save/restore and aggregates worker-level dataset state; iterable restoration requires the same worker count. It is a building block, not proof that arbitrary transforms, rank sharding, packing or HF integrations are correct. [TorchData worker-state requirements](https://meta-pytorch.org/data/beta/stateful_dataloader_tutorial.html)
 - **Trainer:** [ignore_data_skip semantics](https://huggingface.co/docs/transformers/main_classes/trainer).

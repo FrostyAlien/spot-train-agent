@@ -2,9 +2,9 @@
 
 What has been tested, and how. Runbook steps marked *(offline only)* have not run in a live test. After a live run, remove the marker from the steps that ran.
 
-## Offline tests (v0.10.0, macOS / Python 3.13)
+## Offline tests (v0.10.1, macOS / Python 3.13)
 
-399 tests pass:
+400 tests pass:
 
 | Suite | Tests |
 |---|---:|
@@ -15,10 +15,11 @@ What has been tested, and how. Runbook steps marked *(offline only)* have not ru
 | `tests/lifecycle/` experiment-contract validator (server modes, guard, notify, price cap) | 66 |
 | `tests/observe/` optional campaign guard, stall watchdog and alive file, notifications, PyTorch rank mode | 128 |
 | `tests/recover/` checkpoint marker and verifier, the worker's limits | 95 |
-| `tests/select/` cost calculator | 12 |
+| `tests/select/` cost calculator | 13 |
 
-- `test_runbook_commands.py` with `SKY_BIN` checks every `sky` command and flag in the skills against `--help` of an installed SkyPilot; for v0.10.0 it passes on SkyPilot 0.14.0 (earlier releases: 0.13.0 and `skypilot-nightly 1.0.0.dev20261001`). The renderer's round trip with 0.14.0 parses the `ordered` spot-then-on-demand fallback and refuses `job.wait_for_scheduling_timeout`, which the start check then leaves out.
-- `tests/linux/run.sh` runs the stall watchdog's Linux scenarios (t1-t8: ticks, quiet limits, saves on a throttled disk, `torch_rank.py` under `torchrun`, Lightning) in a CPU container. For v0.10.0 all nine (t1-t8, t7b) pass on a Nebius 4-vCPU CPU VM (Docker 29.1.3, Python 3.12, torch 2.14.1+cpu, Lightning 2.6.6).
+- `test_runbook_commands.py` with `SKY_BIN` checks every `sky` command and flag in the skills against `--help` of an installed SkyPilot; for v0.10.1 it passes on SkyPilot 0.14.1 (v0.10.0: 0.14.0; earlier releases: 0.13.0 and `skypilot-nightly 1.0.0.dev20261001`). The renderer's round trip with 0.14.0 parses the `ordered` spot-then-on-demand fallback and refuses `job.wait_for_scheduling_timeout`, which the start check then leaves out.
+- `tests/linux/run.sh` runs the stall watchdog's Linux scenarios (t1-t8: ticks, quiet limits, saves on a throttled disk, `torch_rank.py` under `torchrun`, Lightning) in a CPU container. For v0.10.0 all nine (t1-t8, t7b) pass on a Nebius 4-vCPU CPU VM (Docker 29.1.3, Python 3.12, torch 2.14.1+cpu, Lightning 2.6.6); v0.10.1 does not change the watchdog or `torch_rank.py`, so it was not rerun.
+- `tests/findability.md` for v0.10.1: its questions, with the earlier benchmark's, as a blind A/B against v0.10.0 (19 questions, 5 runs each per version, Sonnet 5.5 answering, Opus 5.5 grading): the same share of expected facts found (0.85 against 0.84 on the shared questions), after fixing the facts the A/B showed agents no longer reached.
 
 Reproduce:
 

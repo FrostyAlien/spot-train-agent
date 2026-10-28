@@ -33,7 +33,7 @@ prune list's `keep`; then the inventory and cleanup as usual.
 ## 5. Helpers in the image
 Task: "Which helper files go into the training image, and where?"
 Expected: `/opt/gpu-skills/`: `checkpoint_marker.py`, `verify_checkpoint.py`, `gpu_preflight.py`,
-`progress_watch.py`, and `torch_rank.py` for PyTorch rank mode; checked in the image's CPU checks.
+`progress_watch.py`, `notify.py`, and `torch_rank.py` for PyTorch rank mode; checked in the image's CPU checks.
 
 ## 6. Checkpoint save interval
 Task: "How do I choose the checkpoint save interval for the main run?"

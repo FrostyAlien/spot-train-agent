@@ -2,7 +2,7 @@
 
 ## Terminal outcome
 
-Establish the terminal outcome from actual job/provider state: completed target and evaluation, failed, cancelled, or blocked. Record exit status, last committed step/useful tokens, checkpoint lineage and reason. Never convert missing logs into success. If the process is still running, confirm whether the task is observation, graceful completion or cancellation before changing it.
+Establish the terminal outcome from actual job/provider state: completed target and evaluation, failed, cancelled, or blocked. Record exit status, last committed step/useful tokens, checkpoint lineage and reason.
 
 ## Artifact contract
 
@@ -12,10 +12,10 @@ The runbook's verify task proves the final checkpoint and listed artifacts. It d
 
 ## Exact cleanup inventory
 
-For each resource record provider, region, account/project, type, exact immutable ID, run ownership evidence, shared flag, requested action, current state, approval reference, data-loss consequence and post-action observed state. Include failed launch leftovers and detached volumes. Stop releases compute but may erase ephemeral storage and usually does not stop all storage charges. Permanent deletion requires applicable explicit approval; preserve resources whose ownership or intended retention is unclear. Use no broad terminate-all or wildcard destructive commands.
+For each resource record provider, region, account/project, type, exact immutable ID, run ownership evidence, shared flag, requested action, current state, approval reference, data-loss consequence and post-action observed state. Include failed launch leftovers and detached volumes. Stop releases compute but may erase ephemeral storage. Preserve a resource whose intended retention is unclear. Stop, delete and wildcard rules: the SKILL's gates.
 
 Verify provider state after each mutation and audit remaining GPUs, disks, volumes, snapshots, buckets (versions, incomplete multipart uploads), IPs, endpoints,
-load balancers/NAT, databases and controller services. Reconcile the inventory with live billing/usage and report residual hourly/monthly costs, retention owner/date and any blocked cleanup. Do not claim zero ongoing charges from a stopped VM alone.
+load balancers/NAT, databases and controller services. Reconcile the inventory with live billing/usage and report residual hourly/monthly costs, retention owner/date and any blocked cleanup.
 
 Account for the control host's idle spend; it stays unless in scope (SKILL.md gates). Do not revoke shared credentials, destroy shared datasets, or cancel commitments as inferred cleanup.
 

@@ -2,8 +2,8 @@
 
 ## Get data into durable storage without a big disk
 A machine that moves a dataset needs disk for the work in progress, not for the dataset. Present the
-options that fit, with a recommendation; **the user decides, and without an answer copy into the
-provider's bucket** (A or B). Run the copy on a CPU machine near the bucket (the control host, or without one a short-lived CPU VM launched
+options that fit, with a recommendation (the SKILL's staging step sets the default; a copy into the bucket
+is A or B). Run the copy on a CPU machine near the bucket (the control host, or without one a short-lived CPU VM launched
 through the user's SkyPilot in the bucket's region, as the image runbook's build VM, deleted afterwards), never on a
 rented GPU.
 
@@ -25,14 +25,18 @@ Scale out with several small CPU VMs on disjoint shard ranges; bandwidth, not di
 (1 PB at 10 Gbit/s is about 9 days). Very large data with one node of at most eight GPUs: check that
 training will actually read it all (epochs x size / read rate) before copying everything.
 
-Upload rules: confirm the exact files, destination (provider, account, bucket, version prefix),
-access/visibility, retention and transfer/storage budget first; an existing login does not grant permission
-to transmit a new dataset. Reuse an already published verified version rather than uploading on every
-experiment or recovery. A copy command is neither no-clobber nor an atomic multi-object publication: prevent
-concurrent writers and overwrites of published version keys (storage policy or a commit protocol), and keep incomplete prefixes unpublished (no
-cleanup without deletion scope). Verify remote byte lengths and hashes (whole-object checksums or read-back;
-multipart ETags are not SHA-256) and record object version IDs where supported. Never upload broad cache or
-home directories, authentication files, private code or unreviewed data; no public ACLs.
+Upload rules:
+- Confirm the exact files, destination (provider, account, bucket, version prefix), access/visibility,
+  retention and transfer/storage budget first; an existing login does not grant permission to transmit a new
+  dataset.
+- Reuse an already published verified version rather than uploading on every experiment or recovery.
+- A copy command is neither no-clobber nor an atomic multi-object publication: prevent concurrent writers and
+  overwrites of published version keys (storage policy or a commit protocol), and keep incomplete prefixes
+  unpublished (no cleanup without deletion scope).
+- Verify remote byte lengths and hashes (whole-object checksums or read-back; multipart ETags are not SHA-256)
+  and record object version IDs where supported.
+- Never upload broad cache or home directories, authentication files, private code or unreviewed data; no
+  public ACLs.
 
 With option C: pin the full commit (`@<40-hex>`), not a branch. A source outage or rate limit during a
 recovery blocks or retries, never starts fresh. A private or gated dataset needs an HF token

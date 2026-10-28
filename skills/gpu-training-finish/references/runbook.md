@@ -1,18 +1,18 @@
 # Finish runbook
 
-On the control host (or, without one, the operator's machine) in bash after the run's last job ended, with the pinned client's `sky` (launch runbook),
-`R=<launch-skill>/scripts/render_job.py`, `G=<observe-skill>/scripts/campaign_guard.py`, `P=~/sky-venv/bin/python`
-(the guard imports SkyPilot), `ST=<controller-skill>/scripts/stage.sh`, `W=~/campaign/<run_id>`
-(the run's campaign directory, launch runbook). Nothing here deletes
+On the control host (or, without one, the operator's machine) in bash after the run's last job ended, with the pinned client's `sky` (launch `references/runbook.md`),
+`R=<launch-skill>/scripts/render_job.py`, and, when the guard ran, `G=<observe-skill>/scripts/campaign_guard.py` and `P=~/sky-venv/bin/python`
+(the guard imports SkyPilot); `ST=<controller-skill>/scripts/stage.sh`, `W=~/campaign/<run_id>`
+(the run's campaign directory, launch `references/runbook.md`). Nothing here deletes
 anything; retention is the user's decision. Steps marked *(offline only)* have not run in a live test yet; the rest ran live (`VALIDATION.md`).
 
-## 1. Every job is terminal and its guard is closed
+## 1. Every job is terminal, and its guard closed when one ran
 ```bash
 sky jobs queue -o json | python3 -c 'import json,sys; [print(r["job_id"], r["status"]) for r in json.load(sys.stdin) if r["job_name"]==sys.argv[1]]' $RUN
-for j in <job ids>; do $P $G --close-job --workdir $W --job-id $j; done
+for j in <job ids>; do $P $G --close-job --workdir $W --job-id $j; done   # only when the guard ran
 ```
-Check: only terminal statuses, and every job reports `closed` (a job the guard cannot observe needs
-`--reason`). Stop guard units that are still active: `systemctl is-active campaign-guard-<job> && sudo systemctl stop campaign-guard-<job>`.
+Check: only terminal statuses. When the guard ran, every job reports `closed` (a job the guard cannot observe needs
+`--reason`), and its units are stopped when still active: `systemctl is-active campaign-guard-<job> && sudo systemctl stop campaign-guard-<job>`.
 
 ## 2. Verify FINAL.json against the bucket (CPU, cents)
 ```bash
@@ -28,18 +28,20 @@ A nonzero exit prints the reason (no FINAL.json, a newer verified commit, a chan
 is unproven; report it, never paper over it. `FINISH-JOURNAL` lines are the lineage of every attempt; its
 `lineage_warnings` (a fresh start after an earlier attempt had committed: that progress was lost) go into
 the report. `FINISH-PARTIAL <dir>` lines are checkpoint directories without a marker (saves cut off by a
-preemption): list them, with the checkpoints older than the final one, in the inventory below.
+preemption): list them, with the checkpoints older than the final one, in the [inventory](#4-what-still-bills).
 
-**A run without FINAL.json** *(offline only)* (stalled with exit 93, cancelled, crashed, or stopped by a budget or attempt limit and not continued): the verify task still
+### A run without FINAL.json *(offline only)*
+For a run that stalled (exit 93), was cancelled, crashed, or was stopped by a budget or attempt limit and not continued, the verify task still
 prints the `FINISH-PRUNE`, `FINISH-JOURNAL` (the lineage) and `FINISH-PARTIAL` lines, then `FINISH no readable
-FINAL.json` and exit 3. Take the outcome from the observe runbook's triage (status, exit code, the `STALL` line).
+FINAL.json` and exit 3. Take the outcome from the observe triage (status, exit code, the `STALL` line: observe `references/runbook.md#triage-a-job-that-did-not-succeed`).
 The run's last durable state is the newest directory in `FINISH-PRUNE`'s `keep` list: complete by presence (its
 marker and every manifest file at its manifest size), not hash-verified; a resume's `select` verifies it. An empty
 `keep` list with no commit in `FINISH-JOURNAL` means nothing durable; otherwise check the bucket (a directory the
 prune list cannot read is skipped). Report both.
 
-**A run the user stops early** *(offline only)*: cancel its job by id, gracefully (``observe `references/commands.md` ``),
-and wait until it is terminal. When the user wants the newest committed checkpoint as the result, run step 2 and
+### A run the user stops early *(offline only)*
+Cancel its job by id, gracefully (observe `references/commands.md#cancel-within-explicit-operation-scope`),
+and wait until it is terminal. When the user wants the newest committed checkpoint as the result, run [the verify task](#2-verify-finaljson-against-the-bucket-cpu-cents) and
 skip its `sky down`: its exit 3 with `FINISH no readable FINAL.json` is expected here, and its cluster stays up
 with the helpers and the bucket mounted until its 10-minute idle autodown. Right after that, write FINAL.json there (`finalize` always names the newest committed
 checkpoint that verifies, with the identity of its manifest):
@@ -89,7 +91,14 @@ for d in <prunable dirs>; do bash -c 'source "$1"; hook_storage_delete "$2"' _ /
 ```
 Never delete the final checkpoint or FINAL.json's artifacts.
 
-Spend: report the last guard ledger's `spend_upper_usd` (each ledger includes earlier jobs) as what it is,
-an upper bound at the on-demand price; the real cost comes from the provider's bill when it arrives.
+### Spend
+Report each spend figure as what it is, an upper bound at the on-demand price; the real cost comes from the
+provider's bill when it arrives.
+- **The worker's limits (Standard tier):** the newest `limits` event in the `FINISH-JOURNAL` lineage
+  (`journal-show`) holds `spend_upper_usd`, the bound up to that worker start. The last allocation's time after it
+  (to its last journal event) adds to it at the on-demand price.
+- **The guard, when one ran:** the last guard ledger's `spend_upper_usd` (each ledger includes earlier jobs),
+  counted up to the guard's last poll of the job.
+- A Minimal-tier run without the guard kept no bound: take the cost from the provider's metered usage.
 
 Then write the closure report ([closure.md](closure.md)).
